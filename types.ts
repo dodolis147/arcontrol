@@ -101,4 +101,5 @@ export interface Ticket {
   openedAt?: string; // Time when ticket was created (HH:mm)
   finishedAt?: string; // Time when ticket was completed (HH:mm)
   archived?: boolean;
+  createdAt?: string;
 }

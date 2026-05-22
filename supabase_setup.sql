@@ -103,8 +103,17 @@ create table if not exists public.tickets (
   photos jsonb default '[]'::jsonb,
   documents jsonb default '[]'::jsonb,
   wa_notified boolean default false,
+  archived boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
+
+-- Sincronização de Colunas Novas para TICKETS (Migration)
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_name = 'tickets' and column_name = 'archived') then
+    alter table public.tickets add column archived boolean default false;
+  end if;
+end $$;
 
 -- =================================================================
 -- INSERÇÃO/ATUALIZAÇÃO DO USUÁRIO ADMINISTRADOR PADRÃO

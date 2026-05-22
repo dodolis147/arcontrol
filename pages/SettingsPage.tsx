@@ -1,12 +1,16 @@
 
 import React, { useState } from 'react';
-import { Palette, RefreshCw, Save, CheckCircle2, Layout, Smartphone, Type } from 'lucide-react';
+import { Palette, RefreshCw, Save, CheckCircle2, Layout, Smartphone, Type, MessageSquare } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import Button from '../components/Button';
 
 const SettingsPage: React.FC = () => {
-  const { theme, updateTheme, resetTheme } = useTheme();
+  const { theme, updateTheme, resetTheme, appName, updateAppName } = useTheme();
   const [localTheme, setLocalTheme] = useState(theme);
+  const [localAppName, setLocalAppName] = useState(appName);
+  const [waPhone, setWaPhone] = useState(() => {
+    return localStorage.getItem('arcontrol_wa_central') || '71988638342';
+  });
   const [saved, setSaved] = useState(false);
 
   const handleColorChange = (key: keyof typeof theme, value: string) => {
@@ -16,6 +20,8 @@ const SettingsPage: React.FC = () => {
 
   const handleSave = () => {
     updateTheme(localTheme);
+    localStorage.setItem('arcontrol_wa_central', waPhone);
+    updateAppName(localAppName);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -27,7 +33,11 @@ const SettingsPage: React.FC = () => {
         primaryLight: '#faf5ff', 
         secondary: '#581c87', 
         text: '#111827',
+        background: '#f9fafb',
     });
+    setLocalAppName('ArControl');
+    setWaPhone('71988638342');
+    localStorage.removeItem('arcontrol_wa_central');
     setSaved(false);
   };
 
@@ -53,70 +63,139 @@ const SettingsPage: React.FC = () => {
               <Layout className="w-5 h-5 text-gray-400" /> Cores do Sistema
             </h2>
             
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Cor Primária (Marca)</label>
-                <div className="flex items-center gap-4 bg-gray-50 p-3 rounded-2xl border border-gray-200">
+                <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Fundo do App</label>
+                <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-200">
+                  <input 
+                    type="color" 
+                    value={localTheme.background}
+                    onChange={(e) => handleColorChange('background', e.target.value)}
+                    className="w-10 h-10 rounded-xl cursor-pointer border-0 bg-transparent p-0"
+                  />
+                  <div className="flex-1 truncate">
+                    <p className="font-bold text-gray-700 text-xs">{localTheme.background}</p>
+                    <p className="text-[9px] text-gray-400 uppercase">Geral</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Destaque (Marca)</label>
+                <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-200">
                   <input 
                     type="color" 
                     value={localTheme.primary}
                     onChange={(e) => handleColorChange('primary', e.target.value)}
-                    className="w-12 h-12 rounded-xl cursor-pointer border-0 bg-transparent p-0"
+                    className="w-10 h-10 rounded-xl cursor-pointer border-0 bg-transparent p-0"
                   />
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-700">{localTheme.primary}</p>
-                    <p className="text-[10px] text-gray-400">Botões, Ícones, Destaques</p>
+                  <div className="flex-1 truncate">
+                    <p className="font-bold text-gray-700 text-xs">{localTheme.primary}</p>
+                    <p className="text-[9px] text-gray-400 uppercase">Botões</p>
                   </div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Cor Secundária (Fundo Intenso)</label>
-                <div className="flex items-center gap-4 bg-gray-50 p-3 rounded-2xl border border-gray-200">
+                <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Fundo Intenso</label>
+                <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-200">
                   <input 
                     type="color" 
                     value={localTheme.secondary}
                     onChange={(e) => handleColorChange('secondary', e.target.value)}
-                    className="w-12 h-12 rounded-xl cursor-pointer border-0 bg-transparent p-0"
+                    className="w-10 h-10 rounded-xl cursor-pointer border-0 bg-transparent p-0"
                   />
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-700">{localTheme.secondary}</p>
-                    <p className="text-[10px] text-gray-400">Login, Cards de Destaque</p>
+                  <div className="flex-1 truncate">
+                    <p className="font-bold text-gray-700 text-xs">{localTheme.secondary}</p>
+                    <p className="text-[9px] text-gray-400 uppercase">Login</p>
                   </div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Tom Claro (Fundos Suaves)</label>
-                <div className="flex items-center gap-4 bg-gray-50 p-3 rounded-2xl border border-gray-200">
+                <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Tom Suave</label>
+                <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-200">
                   <input 
                     type="color" 
                     value={localTheme.primaryLight}
                     onChange={(e) => handleColorChange('primaryLight', e.target.value)}
-                    className="w-12 h-12 rounded-xl cursor-pointer border-0 bg-transparent p-0"
+                    className="w-10 h-10 rounded-xl cursor-pointer border-0 bg-transparent p-0"
                   />
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-700">{localTheme.primaryLight}</p>
-                    <p className="text-[10px] text-gray-400">Fundo de ícones, áreas secundárias</p>
+                  <div className="flex-1 truncate">
+                    <p className="font-bold text-gray-700 text-xs">{localTheme.primaryLight}</p>
+                    <p className="text-[9px] text-gray-400 uppercase">Cards</p>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 md:col-span-2">
                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                   <Type className="w-3 h-3" /> Cor do Texto (Principal)
+                   <Type className="w-3 h-3" /> Cor do Texto
                 </label>
-                <div className="flex items-center gap-4 bg-gray-50 p-3 rounded-2xl border border-gray-200">
+                <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-200">
                   <input 
                     type="color" 
                     value={localTheme.text}
                     onChange={(e) => handleColorChange('text', e.target.value)}
-                    className="w-12 h-12 rounded-xl cursor-pointer border-0 bg-transparent p-0"
+                    className="w-10 h-10 rounded-xl cursor-pointer border-0 bg-transparent p-0"
                   />
                   <div className="flex-1">
-                    <p className="font-bold text-gray-700">{localTheme.text}</p>
-                    <p className="text-[10px] text-gray-400">Títulos, Corpo do Texto</p>
+                    <p className="font-bold text-gray-700 text-xs">{localTheme.text}</p>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6 pt-6 border-t border-gray-100">
+            <h2 className="text-xl font-black text-[var(--theme-text)] flex items-center gap-2">
+              <Type className="w-5 h-5 text-gray-400" /> Nome do Aplicativo
+            </h2>
+            <div className="space-y-2">
+              <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Nome do Sistema (Título)</label>
+              <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-2xl border border-gray-200">
+                <div style={{ backgroundColor: 'var(--theme-primary)' }} className="w-10 h-11 rounded-xl flex items-center justify-center text-white p-2">
+                  <Type className="w-5 h-5" />
+                </div>
+                <div className="flex-1">
+                  <input 
+                    type="text" 
+                    placeholder="Nome do Aplicativo (ex: ArControl)" 
+                    value={localAppName}
+                    onChange={(e) => {
+                      setLocalAppName(e.target.value);
+                      setSaved(false);
+                    }}
+                    className="w-full bg-transparent outline-none font-bold text-sm text-[var(--theme-text)]"
+                  />
+                  <p className="text-[9px] text-gray-400 uppercase mt-0.5">Altera o título exibido no cabeçalho, relatórios e abas do navegador.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6 pt-6 border-t border-gray-100">
+            <h2 className="text-xl font-black text-[var(--theme-text)] flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-gray-400" /> Atendimento & Central
+            </h2>
+            <div className="space-y-2">
+              <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">WhatsApp da Central de Atendimento</label>
+              <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-2xl border border-gray-200">
+                <div style={{ backgroundColor: '#25D366' }} className="w-10 h-11 rounded-xl flex items-center justify-center text-white px-2">
+                  <span className="font-black text-sm tracking-tighter">WA</span>
+                </div>
+                <div className="flex-1">
+                  <input 
+                    type="text" 
+                    placeholder="DDD + Número (ex: 71988638342)" 
+                    value={waPhone}
+                    onChange={(e) => {
+                      setWaPhone(e.target.value.replace(/\D/g, ''));
+                      setSaved(false);
+                    }}
+                    className="w-full bg-transparent outline-none font-bold text-sm text-[var(--theme-text)]"
+                  />
+                  <p className="text-[9px] text-gray-400 uppercase mt-0.5">Apenas números. Usado pelos administradores para gerenciar atendimentos.</p>
                 </div>
               </div>
             </div>
@@ -150,14 +229,17 @@ const SettingsPage: React.FC = () => {
               <Smartphone className="w-5 h-5 text-gray-400" /> Pré-visualização
            </h2>
            
-           <div className="border-[8px] border-gray-900 rounded-[3rem] overflow-hidden bg-gray-50 shadow-2xl relative h-[600px] pointer-events-none select-none">
+           <div 
+            style={{ backgroundColor: localTheme.background }}
+            className="border-[8px] border-gray-900 rounded-[3rem] overflow-hidden shadow-2xl relative h-[600px] pointer-events-none select-none transition-colors duration-500"
+           >
               {/* Fake Mobile Header */}
               <div className="bg-white/80 backdrop-blur-md p-6 border-b border-gray-100 flex justify-between items-center">
                  <div className="flex items-center gap-2">
                     <div style={{ backgroundColor: localTheme.primary }} className="p-2 rounded-xl">
                        <div className="w-4 h-4 bg-white rounded-full opacity-50" />
                     </div>
-                    <span style={{ color: localTheme.text }} className="font-black italic">ArControl</span>
+                    <span style={{ color: localTheme.text }} className="font-black italic">{localAppName}</span>
                  </div>
                  <div className="w-8 h-8 bg-gray-100 rounded-full" />
               </div>

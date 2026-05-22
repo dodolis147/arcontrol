@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Thermometer, Lock, User as UserIcon } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 import { User, UserStatus } from '../types';
 import Button from '../components/Button';
 
@@ -10,6 +11,7 @@ interface LoginPageProps {
 }
 
 const LoginPage: React.FC<LoginPageProps> = ({ users, onLoginSuccess }) => {
+  const { appName } = useTheme();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -47,7 +49,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ users, onLoginSuccess }) => {
           <div className="bg-[var(--theme-primary)] w-16 h-16 rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-[var(--theme-primary-light)]">
             <Thermometer className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-4xl font-black italic tracking-tighter text-[var(--theme-text)]">ArControl</h2>
+          <h2 className="text-4xl font-black italic tracking-tighter text-[var(--theme-text)]">{appName}</h2>
           <p className="text-gray-400 font-bold text-sm uppercase tracking-widest">HVAC Management System</p>
         </div>
 

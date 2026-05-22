@@ -2,6 +2,7 @@
 import React from 'react';
 import { X, Printer, Download } from 'lucide-react';
 import { ACUnit } from '../types';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface PrintQRCodeModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface PrintQRCodeModalProps {
 }
 
 const PrintQRCodeModal: React.FC<PrintQRCodeModalProps> = ({ isOpen, onClose, unit, allUnits }) => {
+  const { appName } = useTheme();
   if (!isOpen) return null;
 
   const unitsToPrint = unit ? [unit] : allUnits;
@@ -45,7 +47,7 @@ const PrintQRCodeModal: React.FC<PrintQRCodeModalProps> = ({ isOpen, onClose, un
               <div key={u.id} className="bg-white p-10 rounded-[2.5rem] border-2 border-gray-200 flex flex-col items-center text-center gap-6 shadow-sm">
                 {/* Alterado bg-blue-600 para bg-purple-700 */}
                 <div className="bg-purple-700 p-2 rounded-xl mb-2">
-                   <span className="text-white font-black text-xs tracking-tighter uppercase italic">ArControl</span>
+                   <span className="text-white font-black text-xs tracking-tighter uppercase italic">{appName}</span>
                 </div>
                 <img src={qrUrl} alt="QR" className="w-44 h-44" />
                 <div className="space-y-2 w-full">

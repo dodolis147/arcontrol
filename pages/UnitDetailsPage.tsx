@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTheme } from '../contexts/ThemeContext';
 import { 
   ChevronLeft, 
   Pencil, 
@@ -26,30 +27,42 @@ import {
   User as UserIconComponent,
   ThumbsUp,
   FileText,
-  Camera
+  Camera,
+  Wrench,
+  ExternalLink
 } from 'lucide-react';
-import { ACUnit, User, UserRole, MaintenanceRecord, ServiceType, UnitStatus } from '../types';
+import { ACUnit, User, UserRole, MaintenanceRecord, ServiceType, UnitStatus, PlannedMaintenance, Ticket } from '../types';
 import { getMaintenanceAdvice } from '../services/geminiService';
 import PhotoReportModal from '../components/PhotoReportModal';
 
 interface UnitDetailsPageProps {
   units: ACUnit[];
   user: User | null;
+  tickets?: Ticket[];
   onUpdateUnit: (id: string, updatedData: Partial<ACUnit>) => void;
   onDeleteUnit: (id: string) => void;
   onOpenQR: (u: ACUnit) => void;
   onAddMaintenance: (id: string, r: MaintenanceRecord) => void;
   onUpdateMaintenance: (unitId: string, recordId: string, data: Partial<MaintenanceRecord>) => void;
+  onAddPlannedMaintenance: (unitId: string, planned: any) => void;
+  onUpdatePlannedMaintenance: (unitId: string, plannedId: string, data: Partial<PlannedMaintenance>) => void;
+  onDeletePlannedMaintenance: (unitId: string, plannedId: string) => void;
   onRateMaintenance: (unitId: string, recordId: string, rating: number) => void;
   isPublic?: boolean;
 }
 
 const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({ 
-  units, user, onUpdateUnit, onDeleteUnit, onOpenQR, onAddMaintenance, onUpdateMaintenance, onRateMaintenance, isPublic = false 
+  units, user, tickets, onUpdateUnit, onDeleteUnit, onOpenQR, onAddMaintenance, onUpdateMaintenance, onAddPlannedMaintenance, onUpdatePlannedMaintenance, onDeletePlannedMaintenance, onRateMaintenance, isPublic = false 
 }) => {
+  const { appName } = useTheme();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const unit = units.find(u => u.id === id);
+
+  const activeTicketForUnit = React.useMemo(() => {
+    if (!tickets || !unit) return null;
+    return tickets.find(t => t.unitId === unit.id && t.status !== 'Concluído');
+  }, [tickets, unit]);
 
   const [activeTab, setActiveTab] = useState<'history' | 'planned' | 'ai'>('history');
   const [loadingAi, setLoadingAi] = useState(false);
@@ -61,6 +74,9 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
   const [isMaintenanceModalOpen, setIsMaintenanceModalOpen] = useState(false);
   const [editingMaintenance, setEditingMaintenance] = useState<MaintenanceRecord | null>(null);
   const [reportRecord, setReportRecord] = useState<MaintenanceRecord | null>(null);
+  const [isPlannedModalOpen, setIsPlannedModalOpen] = useState(false);
+  const [editingPlanned, setEditingPlanned] = useState<PlannedMaintenance | null>(null);
+  const [isConfirmDeletePlanned, setIsConfirmDeletePlanned] = useState<PlannedMaintenance | null>(null);
 
   useEffect(() => { 
     if (unit) setEditForm(unit); 
@@ -89,8 +105,8 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
   };
 
   const handleOpenWhatsApp = () => {
-    const phone = "71988638342";
-    const text = `*SOLICITAÇÃO DE SERVIÇO - ArControl*\n\n*Equipamento:* ${unit.id}\n*Cliente:* ${unit.clientName}\n*Local:* ${unit.location}\n*Marca:* ${unit.brand}\n\n_Desejo solicitar uma visita técnica para este equipamento._`;
+    const phone = localStorage.getItem('arcontrol_wa_central') || "71988638342";
+    const text = `*SOLICITAÇÃO DE SERVIÇO - ${appName}*\n\n*Equipamento:* ${unit.id}\n*Cliente:* ${unit.clientName}\n*Local:* ${unit.location}\n*Marca:* ${unit.brand}\n\n_Desejo solicitar uma visita técnica para este equipamento._`;
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
   };
 
@@ -145,19 +161,40 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
         </div>
         {/* Permission Check: Allow ADMIN OR TECHNICIAN to access these controls */}
         {!isPublic && (user?.role === UserRole.ADMIN || user?.role === UserRole.TECHNICIAN) && !isEditing && (
-          <div className="flex gap-2 w-full sm:w-auto justify-end overflow-x-auto no-scrollbar pb-1">
-            <button onClick={() => setIsEditing(true)} className="p-3 sm:p-3.5 bg-yellow-500 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0">
+          <div className="flex gap-2 sm:gap-3 w-full sm:w-auto justify-end overflow-x-auto no-scrollbar pb-1">
+            <button 
+              onClick={() => setIsEditing(true)} 
+              className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-yellow-500 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0 min-w-[70px] sm:min-w-[85px] gap-1.5"
+            >
               <Pencil className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="text-[9px] sm:text-[10px] font-bold tracking-tight">Editar</span>
             </button>
-            <button onClick={() => setIsConfirmDelete(true)} className="p-3 sm:p-3.5 bg-red-600 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0">
-              <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-            </button>
-            <button onClick={() => setIsMaintenanceModalOpen(true)} className="p-3 sm:p-3.5 bg-green-600 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0">
-              <PlusCircle className="w-4 h-4 sm:w-5 sm:h-5" />
-            </button>
+            {user?.role === UserRole.ADMIN && (
+              <button 
+                onClick={() => setIsConfirmDelete(true)} 
+                className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-red-600 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0 min-w-[70px] sm:min-w-[85px] gap-1.5"
+              >
+                <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="text-[9px] sm:text-[10px] font-bold tracking-tight">Excluir</span>
+              </button>
+            )}
+            {user?.role !== UserRole.TECHNICIAN && (
+              <button 
+                onClick={() => setIsMaintenanceModalOpen(true)} 
+                className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-green-600 hover:bg-green-700 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0 min-w-[75px] sm:min-w-[95px] gap-1.5"
+                title="Registrar Relatório Técnico Fotográfico"
+              >
+                <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="text-[9px] sm:text-[10px] font-bold tracking-tight text-center font-bold">Relatório Técnico</span>
+              </button>
+            )}
             {/* Alterado bg-blue-600 para bg-purple-700 */}
-            <button onClick={() => onOpenQR(unit)} className="p-3 sm:p-3.5 bg-purple-700 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0">
+            <button 
+              onClick={() => onOpenQR(unit)} 
+              className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-purple-700 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0 min-w-[75px] sm:min-w-[95px] gap-1.5"
+            >
               <Printer className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="text-[9px] sm:text-[10px] font-bold tracking-tight text-center font-bold">Imprimir Relatório</span>
             </button>
           </div>
         )}
@@ -197,6 +234,31 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
           </div>
         ) : (
           <>
+            {activeTicketForUnit && (
+              <div id="active-ticket-shortcut" className="p-5 sm:p-6 bg-amber-50/70 border border-amber-200 rounded-[1.8rem] flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm mb-6 animate-pulse-subtle">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-amber-100/80 text-amber-800 rounded-2xl flex-shrink-0">
+                    <Wrench className="w-5 h-5 sm:w-6 sm:h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="px-2 py-0.5 bg-amber-200/60 text-amber-900 rounded-full text-[8px] font-black uppercase tracking-wider inline-block">Chamado Ativo</span>
+                    <h4 className="font-extrabold text-sm sm:text-base text-gray-900 leading-tight">
+                      {activeTicketForUnit.description}
+                    </h4>
+                    <p className="text-[10px] sm:text-xs text-gray-500 font-bold">
+                      ID: <span className="font-mono font-black">{activeTicketForUnit.id}</span> • Status: <span className="font-black text-amber-700">{activeTicketForUnit.status}</span> • Prioridade: <span className={`font-black uppercase text-[9px] ${activeTicketForUnit.priority === 'Urgente' || activeTicketForUnit.priority === 'Alta' ? 'text-red-600' : 'text-amber-800'}`}>{activeTicketForUnit.priority}</span>
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => navigate('/', { state: { searchTerm: activeTicketForUnit.id } })}
+                  className="w-full md:w-auto px-5 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all flex-shrink-0"
+                >
+                  <ExternalLink className="w-4 h-4" /> Ver na Tela Principal
+                </button>
+              </div>
+            )}
+
             <div className="flex justify-between items-start gap-2">
               <div className="space-y-2 flex-1 min-w-0">
                 <div className="flex flex-wrap gap-2">
@@ -263,7 +325,6 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
                     <div className="flex-1 bg-gray-50 border border-gray-100 px-4 py-3 rounded-xl text-[9px] sm:text-[10px] font-bold text-gray-400 truncate flex items-center min-h-[44px]">{publicLink}</div>
                     <button 
                       onClick={() => { navigator.clipboard.writeText(publicLink); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-                      // Alterado bg-white text-blue-600 border-blue-100 para text-purple-700 border-purple-100
                       className={`px-4 sm:px-6 py-3 rounded-xl font-black text-[10px] flex items-center justify-center gap-2 transition-all flex-shrink-0 ${copied ? 'bg-green-600 text-white' : 'bg-white text-purple-700 border border-purple-100'}`}
                     >
                       {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -272,10 +333,6 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
                   </div>
                 </>
               )}
-              
-              <button onClick={handleOpenWhatsApp} className="w-full bg-orange-600 text-white py-4 sm:py-5 rounded-2xl sm:rounded-[1.8rem] font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all text-base sm:text-lg">
-                <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6" /> Abrir Chamado Técnico
-              </button>
             </div>
           </>
         )}
@@ -344,6 +401,13 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
             </div>
             <p className="text-gray-600 text-xs sm:text-sm leading-relaxed mt-4 whitespace-pre-line">{r.description}</p>
             
+            {r.technicalReport && (
+              <div className="mt-4 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Relatório Técnico</p>
+                <p className="text-gray-700 text-xs sm:text-sm leading-relaxed whitespace-pre-line">{r.technicalReport}</p>
+              </div>
+            )}
+            
             {/* Photos Display */}
             {r.photos && r.photos.length > 0 && (
                <div className="mt-6 space-y-4">
@@ -390,16 +454,49 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
           </div>
         ))}
 
-        {activeTab === 'planned' && unit.planned.map(p => (
-          <div key={p.id} className="bg-white p-6 rounded-[2rem] border border-gray-50 shadow-sm flex items-center gap-5">
-            <div className="p-4 bg-orange-50 text-orange-600 rounded-2xl"><Calendar className="w-6 h-6" /></div>
-            <div>
-              <h4 className="font-black text-gray-900 text-lg leading-tight">{p.type}</h4>
-              <p className="text-[11px] text-orange-600 font-black uppercase tracking-widest mb-1">{p.expectedDate}</p>
-              <p className="text-xs text-gray-500 font-medium">{p.description}</p>
-            </div>
+        {activeTab === 'planned' && (
+          <div className="space-y-4">
+            {!isPublic && user?.role === UserRole.ADMIN && (
+              <button 
+                onClick={() => { setEditingPlanned(null); setIsPlannedModalOpen(true); }}
+                className="w-full py-4 bg-orange-50 text-orange-600 border-2 border-dashed border-orange-200 rounded-[2rem] font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-orange-100 transition-all"
+              >
+                <PlusCircle className="w-5 h-5" /> Agendar Próxima Manutenção
+              </button>
+            )}
+            {unit.planned.length === 0 && (
+              <div className="text-center py-10 text-gray-400 font-bold uppercase text-[10px] tracking-widest">Nenhuma manutenção agendada</div>
+            )}
+            {unit.planned.map(p => (
+              <div key={p.id} className="bg-white p-6 rounded-[2rem] border border-gray-50 shadow-sm flex items-center gap-5 relative group">
+                <div className="p-4 bg-orange-50 text-orange-600 rounded-2xl"><Calendar className="w-6 h-6" /></div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-black text-gray-900 text-lg leading-tight">{p.type}</h4>
+                  <p className="text-[11px] text-orange-600 font-black uppercase tracking-widest mb-1">{p.expectedDate}</p>
+                  <p className="text-xs text-gray-500 font-medium">{p.description}</p>
+                </div>
+                {!isPublic && user?.role === UserRole.ADMIN && (
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => { setEditingPlanned(p); setIsPlannedModalOpen(true); }}
+                      className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all"
+                      title="Editar Agendamento"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => setIsConfirmDeletePlanned(p)}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                      title="Excluir Agendamento"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
+        )}
 
         {activeTab === 'ai' && (
           // Alterado bg-blue-900 para bg-purple-900
@@ -432,16 +529,66 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
             <h3 className="text-2xl font-black text-gray-900 mb-2">Excluir?</h3>
             <p className="text-gray-500 text-sm mb-8">Deseja remover o equipamento <span className="font-bold">{unit.id}</span> permanentemente?</p>
             <div className="flex flex-col gap-3">
-              <button onClick={() => { onDeleteUnit(unit.id); navigate('/'); }} className="w-full bg-red-600 text-white py-4 rounded-2xl font-black">Sim, Excluir</button>
+              <button 
+                onClick={() => { 
+                  if (user?.role === UserRole.ADMIN) {
+                    onDeleteUnit(unit.id); 
+                    navigate('/'); 
+                  } else {
+                    setIsConfirmDelete(false);
+                  }
+                }} 
+                className="w-full bg-red-600 text-white py-4 rounded-2xl font-black"
+              >
+                Sim, Excluir
+              </button>
               <button onClick={() => setIsConfirmDelete(false)} className="w-full bg-gray-100 text-gray-500 py-4 rounded-2xl font-black">Cancelar</button>
             </div>
           </div>
         </div>
       )}
 
+      {isConfirmDeletePlanned && (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-white w-full max-sm rounded-[3rem] p-10 text-center shadow-2xl animate-in zoom-in-95">
+            <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Trash2 className="w-10 h-10 text-red-600" />
+            </div>
+            <h3 className="text-2xl font-black text-gray-900 mb-2">Excluir Agendamento?</h3>
+            <p className="text-gray-500 text-sm mb-8">Deseja remover o agendamento de <span className="font-bold">{isConfirmDeletePlanned.type}</span>?</p>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => { onDeletePlannedMaintenance(unit.id, isConfirmDeletePlanned.id); setIsConfirmDeletePlanned(null); }} 
+                className="w-full bg-red-600 text-white py-4 rounded-2xl font-black"
+              >
+                Sim, Excluir
+              </button>
+              <button onClick={() => setIsConfirmDeletePlanned(null)} className="w-full bg-gray-100 text-gray-500 py-4 rounded-2xl font-black">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isPlannedModalOpen && (
+        <PlannedMaintenanceModal 
+          initialData={editingPlanned}
+          onClose={() => { setIsPlannedModalOpen(false); setEditingPlanned(null); }}
+          onSave={(data) => {
+            if (editingPlanned) {
+              onUpdatePlannedMaintenance(unit.id, editingPlanned.id, data);
+            } else {
+              onAddPlannedMaintenance(unit.id, { ...data, id: Date.now().toString() });
+            }
+            setIsPlannedModalOpen(false);
+            setEditingPlanned(null);
+          }}
+        />
+      )}
+
       {isMaintenanceModalOpen && (
         <MaintenanceModal 
           unit={unit} 
+          user={user}
           initialData={editingMaintenance}
           onClose={() => { setIsMaintenanceModalOpen(false); setEditingMaintenance(null); }} 
           onSave={(rec) => { 
@@ -476,15 +623,16 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
   );
 };
 
-const MaintenanceModal = ({ unit, initialData, onClose, onSave }: { unit: ACUnit, initialData: MaintenanceRecord | null, onClose: () => void, onSave: (r: MaintenanceRecord) => void }) => {
+const MaintenanceModal = ({ unit, user, initialData, onClose, onSave }: { unit: ACUnit, user: User | null, initialData: MaintenanceRecord | null, onClose: () => void, onSave: (r: MaintenanceRecord) => void }) => {
   const [form, setForm] = useState({
     type: initialData?.type || ServiceType.PREVENTIVE,
-    technician: initialData?.technician || '',
+    technician: initialData?.technician || (user ? user.username : ''),
     description: initialData?.description || '',
     date: initialData?.date || new Date().toISOString().split('T')[0],
     time: initialData?.time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     photos: initialData?.photos || [] as string[],
-    photoDescriptions: initialData?.photoDescriptions || [] as string[]
+    photoDescriptions: initialData?.photoDescriptions || [] as string[],
+    technicalReport: initialData?.technicalReport || ''
   });
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -516,7 +664,7 @@ const MaintenanceModal = ({ unit, initialData, onClose, onSave }: { unit: ACUnit
     <div className="fixed inset-0 z-[1100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl my-8">
         <div className="flex justify-between items-center mb-8">
-          <h2 className="text-2xl font-black italic tracking-tighter">{initialData ? 'Editar Registro' : 'Registrar Serviço'}</h2>
+          <h2 className="text-2xl font-black italic tracking-tighter flex items-center gap-2">{initialData ? 'Editar Relatório' : 'Registrar Relatório Técnico Fotográfico'}</h2>
           <button onClick={onClose} className="p-2 bg-gray-50 rounded-full"><X className="w-5 h-5" /></button>
         </div>
         <form onSubmit={(e) => { e.preventDefault(); onSave({ id: initialData?.id || Date.now().toString(), ...form }); }} className="space-y-5">
@@ -545,6 +693,10 @@ const MaintenanceModal = ({ unit, initialData, onClose, onSave }: { unit: ACUnit
           <div className="space-y-1">
             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Descrição <span className="text-red-500">*</span></label>
             <textarea className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-medium border-2 border-transparent focus:border-purple-500 outline-none h-24 resize-none" value={form.description} onChange={e => setForm({...form, description: e.target.value})} required placeholder="Detalhamento do serviço realizado..." />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Relatório Técnico</label>
+            <textarea className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-medium border-2 border-transparent focus:border-purple-500 outline-none h-32 resize-none" value={form.technicalReport} onChange={e => setForm({...form, technicalReport: e.target.value})} placeholder="Parecer técnico detalhado, peças trocadas, observações..." />
           </div>
           <div className="space-y-3">
              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Anexar Fotos</label>
@@ -582,6 +734,42 @@ const MaintenanceModal = ({ unit, initialData, onClose, onSave }: { unit: ACUnit
              </div>
           </div>
           <button type="submit" className="w-full bg-purple-700 text-white py-5 rounded-[1.8rem] font-black shadow-xl active:scale-95 transition-all text-lg mt-4">{initialData ? 'Atualizar Registro' : 'Salvar Registro'}</button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const PlannedMaintenanceModal = ({ initialData, onClose, onSave }: { initialData: PlannedMaintenance | null, onClose: () => void, onSave: (p: Partial<PlannedMaintenance>) => void }) => {
+  const [form, setForm] = useState({
+    type: initialData?.type || ServiceType.PREVENTIVE,
+    description: initialData?.description || '',
+    expectedDate: initialData?.expectedDate || new Date().toISOString().split('T')[0]
+  });
+
+  return (
+    <div className="fixed inset-0 z-[1100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl my-8">
+        <div className="flex justify-between items-center mb-8">
+          <h2 className="text-2xl font-black italic tracking-tighter">{initialData ? 'Editar Agendamento' : 'Agendar Manutenção'}</h2>
+          <button onClick={onClose} className="p-2 bg-gray-50 rounded-full"><X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); onSave(form); }} className="space-y-5">
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Tipo <span className="text-red-500">*</span></label>
+            <select className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-bold border-2 border-transparent focus:border-purple-500 outline-none" value={form.type} onChange={e => setForm({...form, type: e.target.value as ServiceType})} required>
+              {Object.values(ServiceType).map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Data Prevista <span className="text-red-500">*</span></label>
+            <input type="date" className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-bold border-2 border-transparent focus:border-purple-500 outline-none" value={form.expectedDate} onChange={e => setForm({...form, expectedDate: e.target.value})} required />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Descrição <span className="text-red-500">*</span></label>
+            <textarea className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-medium border-2 border-transparent focus:border-purple-500 outline-none h-24 resize-none" value={form.description} onChange={e => setForm({...form, description: e.target.value})} required placeholder="Descrição do que deve ser feito..." />
+          </div>
+          <button type="submit" className="w-full bg-purple-700 text-white py-5 rounded-[1.8rem] font-black shadow-xl active:scale-95 transition-all text-lg mt-4">{initialData ? 'Atualizar Agendamento' : 'Agendar'}</button>
         </form>
       </div>
     </div>

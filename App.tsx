@@ -10,9 +10,9 @@ import {
   Scan,
   Settings
 } from 'lucide-react';
-import { ACUnit, User, UserRole, UserStatus, MaintenanceRecord, Ticket, ServiceType, UnitStatus } from './types';
+import { ACUnit, User, UserRole, UserStatus, MaintenanceRecord, Ticket, ServiceType, UnitStatus, PlannedMaintenance } from './types';
 import { supabase } from './services/supabase';
-import { ThemeProvider } from './contexts/ThemeContext';
+import { useTheme } from './contexts/ThemeContext';
 
 // Pages
 import HomePage from './pages/HomePage';
@@ -27,6 +27,7 @@ import SettingsPage from './pages/SettingsPage';
 import PrintQRCodeModal from './components/PrintQRCodeModal';
 
 const App: React.FC = () => {
+  const { appName } = useTheme();
   // Inicializa estados vazios, o useEffect irá popular com dados do Supabase
   const [units, setUnits] = useState<ACUnit[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -110,7 +111,9 @@ const App: React.FC = () => {
     solution: t.solution,
     technicalReport: t.technical_report,
     photos: t.photos || [],
-    documents: t.documents || []
+    documents: t.documents || [],
+    createdAt: t.created_at,
+    archived: t.archived === true
   });
 
   // --- Fetch Data ---
@@ -118,6 +121,20 @@ const App: React.FC = () => {
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
+
+      // Auto-clean tickets older than 6 months (180 days)
+      try {
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const isoThreshold = sixMonthsAgo.toISOString();
+        
+        await supabase
+          .from('tickets')
+          .delete()
+          .lt('created_at', isoThreshold);
+      } catch (cleanError) {
+        console.error("Erro ao limpar chamados com mais de 6 meses:", cleanError);
+      }
       
       // 1. Fetch Users
       const { data: usersData, error: usersError } = await supabase.from('users').select('*');
@@ -196,7 +213,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const hasOpenTickets = activeTickets.some(t => t.status === 'Aberto');
     
-    if (hasOpenTickets && authUser && authUser.role === UserRole.ADMIN) {
+    // Alerta sonoro para Admin e Técnicos quando há chamados abertos
+    const shouldPlayAlert = hasOpenTickets && authUser && (
+      authUser.role === UserRole.ADMIN || 
+      authUser.role === UserRole.TECHNICIAN
+    );
+
+    if (shouldPlayAlert) {
       if (!audioIntervalRef.current) {
         playNotificationSound();
         audioIntervalRef.current = window.setInterval(() => {
@@ -456,6 +479,39 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUpdatePlannedMaintenance = async (unitId: string, plannedId: string, data: Partial<PlannedMaintenance>) => {
+    try {
+      const dbUpdate: any = {};
+      if (data.type) dbUpdate.type = data.type;
+      if (data.description) dbUpdate.description = data.description;
+      if (data.expectedDate) dbUpdate.expected_date = data.expectedDate;
+
+      const { error } = await supabase.from('planned_maintenance').update(dbUpdate).eq('id', plannedId);
+      if (error) throw error;
+
+      setUnits(prev => prev.map(u => u.id === unitId ? {
+        ...u,
+        planned: u.planned.map(p => p.id === plannedId ? { ...p, ...data } : p)
+      } : u));
+    } catch (e) {
+      console.error("Erro ao atualizar manutenção planejada:", e);
+    }
+  };
+
+  const handleDeletePlannedMaintenance = async (unitId: string, plannedId: string) => {
+    try {
+      const { error } = await supabase.from('planned_maintenance').delete().eq('id', plannedId);
+      if (error) throw error;
+
+      setUnits(prev => prev.map(u => u.id === unitId ? {
+        ...u,
+        planned: u.planned.filter(p => p.id !== plannedId)
+      } : u));
+    } catch (e) {
+      console.error("Erro ao deletar manutenção planejada:", e);
+    }
+  };
+
   const handleRateMaintenance = async (unitId: string, recordId: string, rating: number) => {
     try {
       const { error } = await supabase.from('maintenance_records').update({ rating }).eq('id', recordId);
@@ -509,8 +565,15 @@ const App: React.FC = () => {
       if (data.technicalReport) dbUpdate.technical_report = data.technicalReport;
       if (data.photos) dbUpdate.photos = data.photos;
       if (data.documents) dbUpdate.documents = data.documents;
+      if (data.archived !== undefined) dbUpdate.archived = data.archived;
 
-      const { error } = await supabase.from('tickets').update(dbUpdate).eq('id', id);
+      let { error } = await supabase.from('tickets').update(dbUpdate).eq('id', id);
+      if (error && dbUpdate.archived !== undefined) {
+        console.warn("A coluna 'archived' pode nao existir no banco, tentando novamente sem ela:", error.message);
+        const { archived, ...otherFields } = dbUpdate;
+        const retryResult = await supabase.from('tickets').update(otherFields).eq('id', id);
+        error = retryResult.error;
+      }
       if (error) throw error;
 
       setActiveTickets(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
@@ -533,35 +596,31 @@ const App: React.FC = () => {
 
   // Componente de loading interno para usar dentro do ThemeProvider
   const LoadingScreen = () => (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--theme-bg)] transition-colors duration-500">
       <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[var(--theme-primary)]"></div>
     </div>
   );
 
   if (!authUser && !isPublicView) {
-    // Wrap login in ThemeProvider too to allow dynamic colors there
     return (
-        <ThemeProvider>
-            <LoginPage users={users} onLoginSuccess={handleLoginSuccess} />
-        </ThemeProvider>
+      <LoginPage users={users} onLoginSuccess={handleLoginSuccess} />
     );
   }
 
   return (
-    <ThemeProvider>
-        {isLoading && !isPublicView && authUser ? <LoadingScreen /> : (
-            <Router>
-            <div className="min-h-screen bg-gray-50 flex flex-col pb-24 lg:pb-0 lg:pl-20">
-                
-                {!isPublicView && authUser && (
-                <nav className="bg-white/80 backdrop-blur-md px-6 py-4 sticky top-0 z-50 border-b border-gray-100 flex justify-between items-center lg:hidden no-print">
-                    <div className="flex items-center gap-2">
-                    {/* Updated to use dynamic primary color */}
-                    <div className="p-2 rounded-xl bg-[var(--theme-primary)]">
-                        <Thermometer className="w-5 h-5 text-white" />
-                    </div>
-                    <span className="font-black text-xl tracking-tighter text-[var(--theme-text)] italic">ArControl</span>
-                    </div>
+    isLoading && !isPublicView && authUser ? <LoadingScreen /> : (
+        <Router>
+        <div className="min-h-screen bg-[var(--theme-bg)] flex flex-col pb-24 lg:pb-0 lg:pl-20 transition-colors duration-500">
+            
+            {!isPublicView && authUser && (
+            <nav className="bg-white/80 backdrop-blur-md px-6 py-4 sticky top-0 z-50 border-b border-gray-100 flex justify-between items-center lg:hidden no-print">
+                <div className="flex items-center gap-2">
+                {/* Updated to use dynamic primary color */}
+                <div className="p-2 rounded-xl bg-[var(--theme-primary)]">
+                    <Thermometer className="w-5 h-5 text-white" />
+                </div>
+                <span className="font-black text-xl tracking-tighter text-[var(--theme-text)] italic">{appName}</span>
+                </div>
                     <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 transition-all p-2 bg-gray-50 rounded-xl">
                     <LogOut className="w-5 h-5" />
                     </button>
@@ -604,10 +663,10 @@ const App: React.FC = () => {
 
                 <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-8 relative">
                 <Routes>
-                    <Route path="/public/unit/:id" element={<UnitDetailsPage units={units} user={null} isPublic={true} onUpdateUnit={() => {}} onDeleteUnit={() => {}} onOpenQR={(u) => setQrModalState({ isOpen: true, unit: u, all: false })} onAddMaintenance={() => {}} onUpdateMaintenance={() => {}} onRateMaintenance={handleRateMaintenance} />} />
+                    <Route path="/public/unit/:id" element={<UnitDetailsPage units={units} user={null} tickets={activeTickets} isPublic={true} onUpdateUnit={() => {}} onDeleteUnit={() => {}} onOpenQR={(u) => setQrModalState({ isOpen: true, unit: u, all: false })} onAddMaintenance={() => {}} onUpdateMaintenance={() => {}} onAddPlannedMaintenance={() => {}} onUpdatePlannedMaintenance={() => {}} onDeletePlannedMaintenance={() => {}} onRateMaintenance={handleRateMaintenance} />} />
                     <Route path="/" element={<HomePage units={units} user={authUser!} tickets={activeTickets} users={users} onOpenQR={(u) => setQrModalState({ isOpen: true, unit: u, all: false })} onOpenAllQR={() => setQrModalState({ isOpen: true, unit: null, all: true })} onAddTicket={handleAddTicket} onUpdateTicket={handleUpdateTicket} onDeleteTicket={handleDeleteTicket} onAddUnit={handleAddUnit} onUpdateUnit={handleUpdateUnit} onAddPlannedMaintenance={handleAddPlannedMaintenance} />} />
-                    <Route path="/unit/:id" element={<UnitDetailsPage units={units} user={authUser} onUpdateUnit={handleUpdateUnit} onDeleteUnit={handleDeleteUnit} onOpenQR={(u) => setQrModalState({ isOpen: true, unit: u, all: false })} onAddMaintenance={handleAddMaintenance} onUpdateMaintenance={handleUpdateMaintenance} onRateMaintenance={handleRateMaintenance} />} />
-                    <Route path="/reports" element={<ReportsPage units={units} user={authUser!} />} />
+                    <Route path="/unit/:id" element={<UnitDetailsPage units={units} user={authUser} tickets={activeTickets} onUpdateUnit={handleUpdateUnit} onDeleteUnit={handleDeleteUnit} onOpenQR={(u) => setQrModalState({ isOpen: true, unit: u, all: false })} onAddMaintenance={handleAddMaintenance} onUpdateMaintenance={handleUpdateMaintenance} onAddPlannedMaintenance={handleAddPlannedMaintenance} onUpdatePlannedMaintenance={handleUpdatePlannedMaintenance} onDeletePlannedMaintenance={handleDeletePlannedMaintenance} onRateMaintenance={handleRateMaintenance} />} />
+                    <Route path="/reports" element={<ReportsPage units={units} user={authUser!} tickets={activeTickets} users={users} />} />
                     <Route path="/users" element={authUser?.role === UserRole.ADMIN ? <UsersManagementPage users={users} currentUser={authUser} onAdd={handleAddUser} onDelete={handleDeleteUser} onUpdate={handleUpdateUser} /> : <Navigate to="/" />} />
                     <Route path="/register" element={authUser?.role === UserRole.ADMIN ? <RegisterPage onAdd={handleAddUnit} /> : <Navigate to="/" />} />
                     <Route path="/settings" element={authUser?.role === UserRole.ADMIN ? <SettingsPage /> : <Navigate to="/" />} />
@@ -653,8 +712,7 @@ const App: React.FC = () => {
                 />
             </div>
             </Router>
-        )}
-    </ThemeProvider>
+        )
   );
 };
 

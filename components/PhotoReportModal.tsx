@@ -4,6 +4,7 @@ import { X, Download, FileText, Camera, Building2, Wrench, Calendar } from 'luci
 import { Ticket, ACUnit, MaintenanceRecord } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface PhotoReportModalProps {
   data: Ticket | MaintenanceRecord;
@@ -12,6 +13,7 @@ interface PhotoReportModalProps {
 }
 
 const PhotoReportModal: React.FC<PhotoReportModalProps> = ({ data, unit, onClose }) => {
+  const { appName } = useTheme();
   const reportRef = useRef<HTMLDivElement>(null);
   
   // Type guards
@@ -37,7 +39,9 @@ const PhotoReportModal: React.FC<PhotoReportModalProps> = ({ data, unit, onClose
     pdf.save(`Relatorio_Fotografico_${data.id}.pdf`);
   };
 
-  const solutionText = isTicket(data) ? (data.solution || data.description) : data.description;
+  const solutionText = isTicket(data) 
+    ? (data.solution || data.description) 
+    : (data.technicalReport || data.description);
   const technicianName = isTicket(data) ? data.technicianId : data.technician;
   const dateText = isTicket(data) 
     ? `${data.date.split('-').reverse().join('/')} ${data.finishedAt ? `às ${data.finishedAt}` : ''}`
@@ -81,7 +85,7 @@ const PhotoReportModal: React.FC<PhotoReportModalProps> = ({ data, unit, onClose
             {/* PDF Header */}
             <div className="flex justify-between items-start border-b-4 border-indigo-600 pb-8 mb-8">
               <div>
-                <h1 className="text-4xl font-black tracking-tighter text-indigo-600 italic mb-1">ArControl</h1>
+                <h1 className="text-4xl font-black tracking-tighter text-indigo-600 italic mb-1">{appName}</h1>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-[0.3em]">Gestão de Climatização</p>
               </div>
               <div className="text-right">
@@ -160,7 +164,7 @@ const PhotoReportModal: React.FC<PhotoReportModalProps> = ({ data, unit, onClose
 
             {/* Footer */}
             <div className="mt-20 pt-8 border-t border-gray-100 text-center">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">Relatório Gerado Automaticamente via ArControl</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">Relatório Gerado Automaticamente via {appName}</p>
             </div>
           </div>
         </div>
