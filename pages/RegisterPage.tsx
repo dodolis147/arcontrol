@@ -21,22 +21,6 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onAdd }) => {
   });
   const [unitPhotos, setUnitPhotos] = useState<string[]>([]);
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    const files = Array.from(e.target.files);
-    
-    const readers = files.map(file => {
-      return new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file as Blob);
-      });
-    });
-
-    const base64s = await Promise.all(readers);
-    setUnitPhotos(prev => [...prev, ...base64s]);
-  };
-  
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const newUnit: ACUnit = { 
@@ -69,26 +53,7 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onAdd }) => {
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-gray-200 shadow-xl space-y-10">
           <div className="space-y-4">
-            <label className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-1">Fotos de Referência</label>
-            <div className="grid grid-cols-4 gap-3">
-              {unitPhotos.map((p, idx) => (
-                <div key={idx} className="aspect-square rounded-xl overflow-hidden relative border-2 border-white shadow-sm">
-                  <img src={p} className="w-full h-full object-cover" />
-                  <button 
-                    onClick={(e) => { e.preventDefault(); setUnitPhotos(prev => prev.filter((_, i) => i !== idx)); }} 
-                    className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-lg shadow-lg"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-              {unitPhotos.length < 8 && (
-                <label className="aspect-square rounded-xl border-2 border-dashed border-gray-300 bg-white flex flex-col items-center justify-center cursor-pointer hover:bg-purple-50 transition-all shadow-sm">
-                  <Upload className="w-5 h-5 text-gray-400 mb-1" />
-                  <span className="text-[8px] font-black uppercase text-gray-400">Add Foto</span>
-                  <input type="file" multiple accept="image/*" className="hidden" onChange={handlePhotoUpload} />
-                </label>
-              )}
+            <div className="space-y-4">
             </div>
           </div>
 

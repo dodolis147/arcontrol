@@ -113,7 +113,28 @@ begin
   if not exists (select 1 from information_schema.columns where table_name = 'tickets' and column_name = 'archived') then
     alter table public.tickets add column archived boolean default false;
   end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'tickets' and column_name = 'is_transferred') then
+    alter table public.tickets add column is_transferred boolean default false;
+  end if;
 end $$;
+
+-- =================================================================
+-- 6. Tabela de LOGS DE ERRO (SYSTEM_LOGS)
+-- =================================================================
+create table if not exists public.system_logs (
+  id uuid default gen_random_uuid() primary key,
+  message text,
+  stack text,
+  level text default 'error',
+  url text,
+  error_info text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+ALTER TABLE public.system_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Access System Logs" ON public.system_logs;
+CREATE POLICY "Public Access System Logs" ON public.system_logs FOR ALL USING (true);
+
 
 -- =================================================================
 -- INSERÇÃO/ATUALIZAÇÃO DO USUÁRIO ADMINISTRADOR PADRÃO
@@ -158,3 +179,26 @@ CREATE POLICY "Public Access Planned" ON public.planned_maintenance FOR ALL USIN
 
 DROP POLICY IF EXISTS "Public Access Tickets" ON public.tickets;
 CREATE POLICY "Public Access Tickets" ON public.tickets FOR ALL USING (true);
+
+-- =================================================================
+-- 7. CONFIGURAÇÃO DE STORAGE (IMAGES/LOGOS)
+-- =================================================================
+
+-- Criar bucket se não existir
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('app-assets', 'app-assets', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- Políticas de RLS para o bucket app-assets
+DROP POLICY IF EXISTS "Public Read Access - App Assets" ON storage.objects;
+CREATE POLICY "Public Read Access - App Assets" ON storage.objects FOR SELECT USING (bucket_id = 'app-assets');
+
+DROP POLICY IF EXISTS "Authenticated Insert Access - App Assets" ON storage.objects;
+CREATE POLICY "Authenticated Insert Access - App Assets" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'app-assets');
+
+DROP POLICY IF EXISTS "Authenticated Update Access - App Assets" ON storage.objects;
+CREATE POLICY "Authenticated Update Access - App Assets" ON storage.objects FOR UPDATE USING (bucket_id = 'app-assets');
+
+DROP POLICY IF EXISTS "Authenticated Delete Access - App Assets" ON storage.objects;
+CREATE POLICY "Authenticated Delete Access - App Assets" ON storage.objects FOR DELETE USING (bucket_id = 'app-assets');
+

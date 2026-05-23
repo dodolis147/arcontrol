@@ -1,17 +1,55 @@
 
 import React, { useState } from 'react';
-import { Palette, RefreshCw, Save, CheckCircle2, Layout, Smartphone, Type, MessageSquare } from 'lucide-react';
+import { Palette, RefreshCw, Save, CheckCircle2, Layout, Smartphone, Type, MessageSquare, Image as ImageIcon, Upload } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import Button from '../components/Button';
+import { supabase } from '../services/supabase';
 
 const SettingsPage: React.FC = () => {
-  const { theme, updateTheme, resetTheme, appName, updateAppName } = useTheme();
+  const { theme, updateTheme, resetTheme, appName, updateAppName, logoUrl, updateLogoUrl } = useTheme();
   const [localTheme, setLocalTheme] = useState(theme);
   const [localAppName, setLocalAppName] = useState(appName);
   const [waPhone, setWaPhone] = useState(() => {
     return localStorage.getItem('arcontrol_wa_central') || '71988638342';
   });
   const [saved, setSaved] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("A imagem deve ter no máximo 2MB.");
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      alert("Por favor, selecione um arquivo de imagem.");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `logo_${Date.now()}.${fileExt}`;
+      const filePath = `system/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('app-assets')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('app-assets').getPublicUrl(filePath);
+      updateLogoUrl(data.publicUrl);
+    } catch (error) {
+      console.error('Erro ao upar logo:', error);
+      alert('Erro ao fazer upload da logo.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleColorChange = (key: keyof typeof theme, value: string) => {
     setLocalTheme(prev => ({ ...prev, [key]: value }));
@@ -143,6 +181,29 @@ const SettingsPage: React.FC = () => {
                     <p className="font-bold text-gray-700 text-xs">{localTheme.text}</p>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6 pt-6 border-t border-gray-100">
+            <h2 className="text-xl font-black text-[var(--theme-text)] flex items-center gap-2">
+              <ImageIcon className="w-5 h-5 text-gray-400" /> Logo do Sistema
+            </h2>
+            <div className="flex items-center gap-4">
+              <div className="w-20 h-20 bg-gray-100 rounded-2xl flex items-center justify-center overflow-hidden border border-gray-200">
+                {logoUrl ? (
+                  <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+                ) : (
+                  <ImageIcon className="w-8 h-8 text-gray-400" />
+                )}
+              </div>
+              <div className="flex-1">
+                <label className="flex items-center gap-2 bg-gray-100 px-4 py-2 rounded-xl cursor-pointer hover:bg-gray-200 transition-colors w-fit">
+                  <Upload className="w-4 h-4" />
+                  <span className="text-xs font-bold uppercase">{isUploading ? 'Enviando...' : 'Alterar Logo'}</span>
+                  <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" disabled={isUploading} />
+                </label>
+                <p className="text-[9px] text-gray-400 uppercase mt-2">Formatos: PNG, JPG. Máx: 2MB.</p>
               </div>
             </div>
           </div>

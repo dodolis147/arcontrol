@@ -169,8 +169,6 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
     };
   }, [allRecords]);
 
-  const handlePrint = () => window.print();
-
   const handleShareGlobalWhatsApp = () => {
     const techName = user.role === UserRole.TECHNICIAN ? user.username : (selectedTechnician || 'Todos');
     const clientName = selectedClient || 'Todos os Clientes';
@@ -191,10 +189,11 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
   };
 
   return (
-    <div className="space-y-8 pb-20 animate-in fade-in duration-500 no-print">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          {/* Alterado bg-blue-600 para bg-purple-700 */}
+    <>
+      <div className="space-y-8 pb-20 animate-in fade-in duration-500 print:hidden">
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            {/* Alterado bg-blue-600 para bg-purple-700 */}
           <div className="bg-purple-700 p-4 rounded-3xl shadow-xl shadow-purple-200">
             <FileBarChart className="w-8 h-8 text-white" />
           </div>
@@ -204,11 +203,6 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={handlePrint} className="p-4 bg-gray-900 text-white rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2" title="Imprimir Relatório em PDF">
-            <FileDown className="w-5 h-5" />
-            <span className="hidden sm:inline font-black text-xs uppercase tracking-widest">PDF / Imprimir</span>
-          </button>
-          
           <button 
             onClick={handleShareGlobalWhatsApp} 
             className="p-4 bg-emerald-600 text-white rounded-2xl shadow-xl hover:bg-emerald-700 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
@@ -357,7 +351,7 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
 
               const getStatusBadge = (s: string) => {
                 switch (s) {
-                  case 'Concluído': return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                  case 'Finalizado': return 'bg-emerald-50 text-emerald-800 border-emerald-200';
                   case 'Em Atendimento': return 'bg-indigo-50 text-indigo-800 border-indigo-200';
                   case 'Reagendado': return 'bg-purple-55 text-purple-800 border-purple-250';
                   default: return 'bg-blue-50 text-blue-800 border-blue-205';
@@ -365,7 +359,7 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
               };
 
               const getStripeColorClass = (p: string, s: string) => {
-                if (s === 'Concluído') return 'border-l-emerald-500 bg-emerald-50/5';
+                if (s === 'Finalizado') return 'border-l-emerald-500 bg-emerald-50/5';
                 switch (p) {
                   case 'Urgente': return 'border-l-red-500 bg-red-50/5';
                   case 'Alta': return 'border-l-orange-500 bg-orange-50/5';
@@ -411,14 +405,7 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Descrição do Problema</p>
                     <p className="text-sm font-bold text-gray-700 leading-relaxed">{ticket.description}</p>
                     
-                    {ticket.solution && (
-                      <div className="mt-4 pt-3 border-t border-gray-200/60">
-                        <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1 flex items-center gap-1">
-                          <CheckSquare className="w-3.5 h-3.5" /> Solução do Técnico
-                        </p>
-                        <p className="text-sm font-bold text-gray-750 leading-relaxed">{ticket.solution}</p>
-                      </div>
-                    )}
+
 
                     {ticket.technicalReport && (
                       <div className="mt-3 pt-3 border-t border-gray-200/60">
@@ -456,22 +443,32 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
                               <html>
                                 <head>
                                   <title>Relatório de Chamado - #${ticket.id}</title>
+                                  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
                                   <style>
-                                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #333; line-height: 1.6; }
-                                    .header { border-bottom: 3px solid #7e22ce; padding-bottom: 20px; margin-bottom: 30px; }
-                                    .title { font-size: 28px; font-weight: 950; color: #7e22ce; font-style: italic; margin: 0; }
-                                    .subtitle { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #666; font-weight: bold; margin-top: 5px; }
-                                    .meta-grid { display: grid; grid-template-cols: 1fr 1fr; gap: 20px; background: #f9fafb; padding: 20px; border-radius: 12px; border: 1px solid #e5e7eb; margin-bottom: 30px; }
-                                    .meta-item label { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #9ca3af; letter-spacing: 1px; display: block; margin-bottom: 4px; }
-                                    .meta-item value { font-weight: bold; font-size: 14px; }
-                                    .content-section { margin-bottom: 25px; }
-                                    .content-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; color: #4b5563; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; margin-top: 0; }
-                                    .content-body { font-size: 14px; color: #374151; white-space: pre-line; }
-                                    .photo-grid { display: grid; grid-template-cols: 1fr 1fr; gap: 15px; margin-top: 15px; page-break-inside: avoid; }
+                                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; color: #333; line-height: 1.6; max-width: 800px; margin: 0 auto; }
+                                    .header { border-bottom: 3px solid #7e22ce; padding-bottom: 15px; margin-bottom: 20px; }
+                                    .title { font-size: 24px; font-weight: 950; color: #7e22ce; font-style: italic; margin: 0; }
+                                    .subtitle { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #666; font-weight: bold; margin-top: 5px; }
+                                    .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; background: #f9fafb; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 20px; page-break-inside: avoid; }
+                                    .meta-item label { font-size: 9px; font-weight: 800; text-transform: uppercase; color: #9ca3af; letter-spacing: 1px; display: block; margin-bottom: 2px; }
+                                    .meta-item value { font-weight: bold; font-size: 13px; word-break: break-all; }
+                                    .content-section { margin-bottom: 20px; page-break-inside: avoid; }
+                                    .content-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #4b5563; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; margin-top: 0; margin-bottom: 10px; }
+                                    .content-body { font-size: 13px; color: #374151; white-space: pre-wrap; word-break: break-word; }
+                                    .photo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px; }
                                     .photo-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background: #fff; text-align: center; page-break-inside: avoid; }
-                                    .photo-item img { max-width: 100%; height: 220px; object-fit: cover; border-radius: 6px; display: block; margin: 0 auto 8px auto; }
-                                    .photo-caption { font-size: 10px; color: #666; font-weight: bold; margin-top: 4px; }
-                                    .footer { font-size: 10px; color: #9ca3af; text-align: center; border-with: 1px solid #e5e7eb; padding-top: 20px; margin-top: 50px; }
+                                    .photo-item img { max-width: 100%; height: auto; max-height: 250px; object-fit: contain; border-radius: 6px; display: block; margin: 0 auto 8px auto; }
+                                    .photo-caption { font-size: 10px; color: #666; font-weight: bold; margin-top: 4px; word-break: break-word; }
+                                    .footer { font-size: 9px; color: #9ca3af; text-align: center; border-top: 1px solid #e5e7eb; padding-top: 15px; margin-top: 30px; }
+                                    
+                                    @media print {
+                                      @page { size: auto; margin: 15mm; }
+                                      body { padding: 0; max-width: 100%; }
+                                      .meta-grid { grid-template-columns: 1fr 1fr; background: transparent; border: none; padding: 0; gap: 10px; }
+                                      .meta-item { border-bottom: 1px solid #eee; padding-bottom: 5px; }
+                                      .photo-grid { grid-template-columns: 1fr 1fr; }
+                                      .photo-item { border: none; padding: 0; }
+                                    }
                                   </style>
                                 </head>
                                 <body>
@@ -494,12 +491,6 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
                                     <div class="content-body">${ticket.description}</div>
                                   </div>
 
-                                  ${ticket.solution ? `
-                                  <div class="content-section">
-                                    <h3>Solução Executada</h3>
-                                    <div class="content-body">${ticket.solution}</div>
-                                  </div>
-                                  ` : ''}
 
                                   ${ticket.technicalReport ? `
                                   <div class="content-section">
@@ -551,7 +542,6 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
                             `*Status:* ${ticket.status}\n` +
                             `*Prioridade:* ${ticket.priority}\n\n` +
                             `*Descrição do Problema:* \n${ticket.description}\n\n` +
-                            (ticket.solution ? `*Solução do Técnico:* \n${ticket.solution}\n\n` : '') +
                             (ticket.technicalReport ? `*Relatório Técnico:* \n${ticket.technicalReport}\n\n` : '') +
                             `_Gerado via ${appName}_`;
                             
@@ -576,9 +566,10 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
           )}
         </div>
       </div>
+      </div>
       
       {/* Hidden view for browser printing */}
-      <div id="report-printable-area" className="hidden p-10 bg-white text-black font-sans print:block">
+      <div id="report-printable-area" className="hidden p-8 sm:p-10 bg-white text-black font-sans">
         <header className="flex justify-between items-center border-b-4 border-purple-700 pb-6 mb-8">
           <div>
             {/* Alterado para roxo */}
@@ -589,7 +580,7 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
             <p className="text-sm font-bold text-gray-600">Gerado: {new Date().toLocaleDateString('pt-BR')}</p>
           </div>
         </header>
-        <div className="mb-10 p-6 bg-gray-50 border border-gray-200 rounded-2xl grid grid-cols-3 gap-10">
+        <div className="mb-10 p-6 bg-gray-50 border border-gray-200 rounded-2xl print-grid-3 md:grid md:grid-cols-3 gap-10">
            <div><p className="text-[10px] font-black text-gray-400 uppercase mb-1">Cliente</p><p className="font-bold">{selectedClient || 'Relatório Global'}</p></div>
            <div><p className="text-[10px] font-black text-gray-400 uppercase mb-1">Satisfação Média</p><p className="font-bold text-yellow-600">{stats.avgRating} Estrelas</p></div>
            <div><p className="text-[10px] font-black text-gray-400 uppercase mb-1">Volume</p><p className="font-bold">{stats.total} Atendimentos</p></div>
@@ -600,20 +591,20 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
               <h2 className="text-xl font-bold text-gray-800">Relatório Histórico de Chamados Ocorridos</h2>
               <p className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider">Chamados registrados (Política de Retenção de 6 Meses)</p>
             </div>
-            <table className="w-full border-collapse">
+            <table className="w-full border-collapse print-table">
               <thead>
                 <tr className="bg-purple-700 text-white text-left text-[9px] font-black uppercase">
                   <th className="px-4 py-3">ID Chamado</th>
                   <th className="px-4 py-3">Data</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Prioridade</th>
-                  <th className="px-4 py-3">Descrição / Solução Técnica</th>
+                  <th className="px-4 py-3">Descrição</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 text-[11px]">
                 {filteredTickets.map((t, i) => {
                   let rowStripe = 'border-l-4 border-l-blue-500';
-                  if (t.status === 'Concluído') rowStripe = 'border-l-4 border-l-emerald-500';
+                  if (t.status === 'Finalizado') rowStripe = 'border-l-4 border-l-emerald-500';
                   else if (t.priority === 'Urgente') rowStripe = 'border-l-4 border-l-red-500';
                   else if (t.priority === 'Alta') rowStripe = 'border-l-4 border-l-orange-500';
                   else if (t.priority === 'Média') rowStripe = 'border-l-4 border-l-amber-500';
@@ -624,9 +615,9 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
                       <td className="px-4 py-4 font-bold">{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : t.date}</td>
                       <td className="px-4 py-4 font-bold">{t.status}</td>
                       <td className="px-4 py-4 font-black">{t.priority}</td>
-                      <td className="px-4 py-4 text-gray-700">
+                      <td className="px-4 py-4 text-gray-700 break-words max-w-[200px]">
                         <p className="font-bold">{t.description}</p>
-                        {t.solution && <p className="text-[10px] text-emerald-700 mt-1">Solução executada: {t.solution}</p>}
+                        
                       </td>
                     </tr>
                   );
@@ -636,7 +627,38 @@ const ReportsPage: React.FC<ReportsPageProps> = ({ units, user, tickets = [], us
           </>
         )}
       </div>
-    </div>
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #report-printable-area, #report-printable-area * { visibility: visible; }
+          #report-printable-area { 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 100% !important; 
+            display: block !important; 
+            background: white !important;
+            margin: 0 !important;
+          }
+          .print-grid-3 {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr 1fr !important;
+            gap: 1.5rem !important;
+          }
+          .print-table {
+            width: 100% !important;
+            max-width: 100% !important;
+            table-layout: fixed !important;
+          }
+          .print-table th, .print-table td {
+            word-wrap: break-word !important;
+            overflow-wrap: break-word !important;
+            white-space: normal !important;
+          }
+          .print\\:hidden { display: none !important; }
+        }
+      `}</style>
+    </>
   );
 };
 

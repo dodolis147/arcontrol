@@ -18,7 +18,7 @@ const PrintQRCodeModal: React.FC<PrintQRCodeModalProps> = ({ isOpen, onClose, un
   const unitsToPrint = unit ? [unit] : allUnits;
 
   return (
-    <div className="fixed inset-0 z-[1100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto no-print">
+    <div className="fixed inset-0 z-[1100] bg-black/90 backdrop-blur-md flex flex-col items-center pt-10 sm:pt-20 pb-10 p-4 overflow-y-auto no-print">
       <div className="bg-white w-full max-w-4xl rounded-[3rem] p-10 shadow-2xl my-8">
         <div className="flex justify-between items-center mb-10">
           <div>

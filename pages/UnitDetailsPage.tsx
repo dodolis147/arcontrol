@@ -27,13 +27,13 @@ import {
   User as UserIconComponent,
   ThumbsUp,
   FileText,
-  Camera,
   Wrench,
   ExternalLink
 } from 'lucide-react';
 import { ACUnit, User, UserRole, MaintenanceRecord, ServiceType, UnitStatus, PlannedMaintenance, Ticket } from '../types';
 import { getMaintenanceAdvice } from '../services/geminiService';
-import PhotoReportModal from '../components/PhotoReportModal';
+import { supabase } from '../services/supabase';
+import imageCompression from 'browser-image-compression';
 
 interface UnitDetailsPageProps {
   units: ACUnit[];
@@ -61,7 +61,7 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
 
   const activeTicketForUnit = React.useMemo(() => {
     if (!tickets || !unit) return null;
-    return tickets.find(t => t.unitId === unit.id && t.status !== 'Concluído');
+    return tickets.find(t => t.unitId === unit.id && t.status !== 'Finalizado');
   }, [tickets, unit]);
 
   const [activeTab, setActiveTab] = useState<'history' | 'planned' | 'ai'>('history');
@@ -178,16 +178,7 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
                 <span className="text-[9px] sm:text-[10px] font-bold tracking-tight">Excluir</span>
               </button>
             )}
-            {user?.role !== UserRole.TECHNICIAN && (
-              <button 
-                onClick={() => setIsMaintenanceModalOpen(true)} 
-                className="flex flex-col items-center justify-center p-2.5 sm:p-3.5 bg-green-600 hover:bg-green-700 text-white rounded-xl sm:rounded-2xl shadow-lg active:scale-95 transition-all flex-shrink-0 min-w-[75px] sm:min-w-[95px] gap-1.5"
-                title="Registrar Relatório Técnico Fotográfico"
-              >
-                <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="text-[9px] sm:text-[10px] font-bold tracking-tight text-center font-bold">Relatório Técnico</span>
-              </button>
-            )}
+
             {/* Alterado bg-blue-600 para bg-purple-700 */}
             <button 
               onClick={() => onOpenQR(unit)} 
@@ -425,7 +416,7 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
                     onClick={() => setReportRecord(r)}
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
                   >
-                    <Camera className="w-4 h-4" /> Gerar Relatório Fotográfico
+                    Gerar Relatório Fotográfico
                   </button>
                </div>
             )}
@@ -603,13 +594,7 @@ const UnitDetailsPage: React.FC<UnitDetailsPageProps> = ({
         />
       )}
 
-      {reportRecord && (
-        <PhotoReportModal 
-          data={reportRecord} 
-          unit={unit} 
-          onClose={() => setReportRecord(null)} 
-        />
-      )}
+
       <style>{`
         @keyframes pulse-subtle {
           0%, 100% { opacity: 1; transform: scale(1); }
@@ -634,30 +619,47 @@ const MaintenanceModal = ({ unit, user, initialData, onClose, onSave }: { unit: 
     photoDescriptions: initialData?.photoDescriptions || [] as string[],
     technicalReport: initialData?.technicalReport || ''
   });
+  const [uploading, setUploading] = useState(false);
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    const readers = Array.from(e.target.files).map(file => {
-      return new Promise<string>(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file as Blob);
-      });
-    });
-    const base64s = await Promise.all(readers);
-    setForm(prev => ({ 
-      ...prev, 
-      photos: [...prev.photos, ...base64s],
-      photoDescriptions: [...prev.photoDescriptions, ...base64s.map(() => '')]
-    }));
-  };
-
-  const removePhoto = (index: number) => {
-    setForm(prev => ({
-      ...prev,
-      photos: prev.photos.filter((_, i) => i !== index),
-      photoDescriptions: prev.photoDescriptions.filter((_, i) => i !== index)
-    }));
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    
+    setUploading(true);
+    const files = Array.from(e.target.files) as File[];
+    
+    try {
+      const uploadedUrls: string[] = [];
+      for (const file of files) {
+        // Compress image
+        const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1024, useWebWorker: true };
+        const compressedFile = await imageCompression(file, options);
+        
+        // Upload to Supabase
+        const fileName = `${Date.now()}_${file.name}`;
+        const { data, error } = await supabase.storage
+          .from('maintenance-photos')
+          .upload(fileName, compressedFile);
+          
+        if (error) throw error;
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('maintenance-photos')
+          .getPublicUrl(fileName);
+        
+        uploadedUrls.push(publicUrl);
+      }
+      
+      setForm(prev => ({
+        ...prev,
+        photos: [...prev.photos, ...uploadedUrls],
+        photoDescriptions: [...prev.photoDescriptions, ...files.map(() => '')]
+      }));
+    } catch (error) {
+      console.error('Erro ao fazer upload da imagem:', error);
+      alert('Erro ao fazer upload da imagem.');
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -699,40 +701,32 @@ const MaintenanceModal = ({ unit, user, initialData, onClose, onSave }: { unit: 
             <textarea className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-medium border-2 border-transparent focus:border-purple-500 outline-none h-32 resize-none" value={form.technicalReport} onChange={e => setForm({...form, technicalReport: e.target.value})} placeholder="Parecer técnico detalhado, peças trocadas, observações..." />
           </div>
           <div className="space-y-3">
-             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Anexar Fotos</label>
-             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {form.photos.map((p, i) => (
-                   <div key={i} className="space-y-2 relative group">
-                      <button 
-                        type="button"
-                        onClick={() => removePhoto(i)}
-                        className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-all z-10"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                      <img src={p} className="w-full aspect-video rounded-xl object-cover border border-gray-200" />
-                      <input 
-                        type="text" 
-                        placeholder="Descrição da foto..." 
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[10px] font-medium outline-none focus:border-purple-500"
-                        value={form.photoDescriptions[i] || ''}
-                        onChange={(e) => {
-                          const newDescs = [...form.photoDescriptions];
-                          newDescs[i] = e.target.value;
-                          setForm({ ...form, photoDescriptions: newDescs });
-                        }}
-                      />
-                   </div>
-                ))}
-                {form.photos.length < 8 && (
-                   <label className="aspect-video rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-purple-50 transition-all">
-                      <Plus className="w-6 h-6 text-gray-300" />
-                      <span className="text-[8px] font-black uppercase mt-1">Add Foto</span>
-                      <input type="file" multiple accept="image/*" className="hidden" onChange={handlePhotoUpload} />
-                   </label>
-                )}
+             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Fotos do Serviço</label>
+             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+              {form.photos.map((url, idx) => (
+                <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100">
+                  <img src={url} className="w-full h-full object-cover" />
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      const newPhotos = [...form.photos];
+                      const newDescs = [...form.photoDescriptions];
+                      newPhotos.splice(idx, 1);
+                      newDescs.splice(idx, 1);
+                      setForm({...form, photos: newPhotos, photoDescriptions: newDescs});
+                    }}
+                    className="absolute top-1 right-1 p-1 bg-black/50 text-white rounded-full hover:bg-red-500"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-purple-500 hover:bg-purple-50 transition-all">
+                {uploading ? <p className="text-[10px] font-bold">Carregando...</p> : <Plus className="w-6 h-6 text-gray-400" />}
+                <input type="file" className="hidden" multiple accept="image/*" onChange={handleFileUpload} />
+              </label>
              </div>
-          </div>
+           </div>
           <button type="submit" className="w-full bg-purple-700 text-white py-5 rounded-[1.8rem] font-black shadow-xl active:scale-95 transition-all text-lg mt-4">{initialData ? 'Atualizar Registro' : 'Salvar Registro'}</button>
         </form>
       </div>
@@ -763,7 +757,7 @@ const PlannedMaintenanceModal = ({ initialData, onClose, onSave }: { initialData
           </div>
           <div className="space-y-1">
             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Data Prevista <span className="text-red-500">*</span></label>
-            <input type="date" className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-bold border-2 border-transparent focus:border-purple-500 outline-none" value={form.expectedDate} onChange={e => setForm({...form, expectedDate: e.target.value})} required />
+            <input type="date" min={new Date().toISOString().split('T')[0]} className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-bold border-2 border-transparent focus:border-purple-500 outline-none" value={form.expectedDate} onChange={e => setForm({...form, expectedDate: e.target.value})} required />
           </div>
           <div className="space-y-1">
             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Descrição <span className="text-red-500">*</span></label>

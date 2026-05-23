@@ -40,6 +40,16 @@ export interface User {
   role: UserRole;
   clientName: string | null;
   status: UserStatus;
+  avatarUrl?: string;
+}
+
+export interface MaintenanceReminder {
+  id: string;
+  unitId: string;
+  unitName: string;
+  status: 'PENDING' | 'ACCEPTED' | 'CONFIRMED';
+  proposedDate?: string;
+  confirmedDate?: string;
 }
 
 export interface MaintenanceRecord {
@@ -86,7 +96,7 @@ export interface Ticket {
   clientName: string;
   description: string;
   date: string;
-  status: 'Aberto' | 'Em Atendimento' | 'Concluído' | 'Reagendado';
+  status: 'Aberto' | 'Em Atendimento' | 'Finalizado' | 'Reagendado';
   priority: 'Baixa' | 'Média' | 'Alta' | 'Urgente';
   technicianId?: string; // ID or Username of the technician
   rating?: number; // 1 to 5
@@ -102,4 +112,5 @@ export interface Ticket {
   finishedAt?: string; // Time when ticket was completed (HH:mm)
   archived?: boolean;
   createdAt?: string;
+  isTransferred?: boolean;
 }

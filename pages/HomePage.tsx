@@ -1,6 +1,9 @@
 import React, { useState, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
+import { useUnits } from "../contexts/UnitsContext";
+import { useTickets } from "../contexts/TicketsContext";
+import { useImageUpload } from "../src/hooks/useImageUpload";
 import {
   Search,
   Scan,
@@ -28,6 +31,7 @@ import {
   PlayCircle,
   CheckSquare,
   CalendarClock,
+  Calendar,
   History,
   Building2,
   Camera,
@@ -50,94 +54,13 @@ import {
   Ticket,
   UnitStatus,
   ServiceType,
+  MaintenanceReminder,
 } from "../types";
 import QRScannerModal from "../components/QRScannerModal";
-import PhotoReportModal from "../components/PhotoReportModal";
-
-const TicketCountdown: React.FC<{ ticket: Ticket }> = ({ ticket }) => {
-  const [timeLeft, setTimeLeft] = React.useState<string>("");
-  const [isWarning, setIsWarning] = React.useState<boolean>(false);
-  const [isExpired, setIsExpired] = React.useState<boolean>(false);
-
-  React.useEffect(() => {
-    const calculateTime = () => {
-      let startMs = 0;
-      if (ticket.createdAt) {
-        startMs = new Date(ticket.createdAt).getTime();
-      } else if (ticket.date && ticket.openedAt) {
-        try {
-          const [h, m] = ticket.openedAt.split(":");
-          const d = new Date(ticket.date);
-          d.setHours(parseInt(h, 10), parseInt(m, 10), 0, 0);
-          startMs = d.getTime();
-        } catch (e) {
-          startMs = new Date(ticket.date).getTime();
-        }
-      } else {
-        startMs = new Date().getTime();
-      }
-
-      const nowMs = Date.now();
-      // 8-hour Commercial limit (SLA) countdown
-      const limitMs = startMs + 8 * 60 * 60 * 1000;
-      const diffMs = limitMs - nowMs;
-
-      if (diffMs <= 0) {
-        setTimeLeft("Prazo Excedido");
-        setIsExpired(true);
-        setIsWarning(true);
-      } else {
-        setIsExpired(false);
-        const hours = Math.floor(diffMs / (3600 * 1000));
-        const mins = Math.floor((diffMs % (3600 * 1000)) / (60 * 1000));
-        const secs = Math.floor((diffMs % (60 * 1000)) / 1000);
-
-        const hh = String(hours).padStart(2, "0");
-        const mm = String(mins).padStart(2, "0");
-        const ss = String(secs).padStart(2, "0");
-
-        setTimeLeft(`${hh}h ${mm}m ${ss}s`);
-        setIsWarning(hours < 2); // warn under 2 hours
-      }
-    };
-
-    calculateTime();
-    const interval = setInterval(calculateTime, 1000);
-    return () => clearInterval(interval);
-  }, [ticket]);
-
-  return (
-    <div className="mt-2">
-      {/* SLA countdown timer */}
-      {isExpired ? (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-100 text-red-700 border border-red-200">
-          <Clock className="w-3.5 h-3.5 animate-pulse text-red-600" />
-          <span className="text-[10px] font-black uppercase tracking-wider">
-            Prazo Excedido ( Prazo de 8h em horario comercial)
-          </span>
-        </div>
-      ) : (
-        <div
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-colors ${
-            isWarning
-              ? "bg-amber-100 border-amber-300 text-amber-800 animate-pulse"
-              : "bg-emerald-50 border-emerald-200 text-emerald-800"
-          }`}
-        >
-          <Clock
-            className={`w-3.5 h-3.5 ${isWarning ? "text-amber-500 animate-bounce" : "text-emerald-500"}`}
-          />
-          <span className="text-[10px] font-black uppercase tracking-wider">
-            Tempo Restante ( Prazo de 8h em horario comercial):{" "}
-            <span className="font-extrabold text-sm font-mono ml-1">
-              {timeLeft}
-            </span>
-          </span>
-        </div>
-      )}
-    </div>
-  );
-};
+import RemindersModal from "../components/RemindersModal";
+import { TicketCountdown } from "../components/TicketCountdown";
+import { supabase } from '../services/supabase';
+import imageCompression from 'browser-image-compression';
 
 interface HomePageProps {
   units: ACUnit[];
@@ -155,6 +78,9 @@ interface HomePageProps {
     unitId: string,
     planned: any,
   ) => Promise<void> | void;
+  reminders: MaintenanceReminder[];
+  onAcceptReminder: (id: string, date: string) => void;
+  onRemoveReminder: (id: string) => void;
 }
 
 const HomePage: React.FC<HomePageProps> = ({
@@ -170,6 +96,9 @@ const HomePage: React.FC<HomePageProps> = ({
   onAddUnit,
   onUpdateUnit,
   onAddPlannedMaintenance,
+  reminders,
+  onAcceptReminder,
+  onRemoveReminder,
 }) => {
   const { appName } = useTheme();
   const [searchTerm, setSearchTerm] = useState("");
@@ -179,19 +108,42 @@ const HomePage: React.FC<HomePageProps> = ({
   const [equipmentStatusFilter, setEquipmentStatusFilter] = useState<string>("Todos");
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(50);
+  const [uploading, setUploading] = useState(false);
+  const { uploadImages, uploading: isImageUploading } = useImageUpload('maintenance-photos');
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    
+    setUploading(true);
+    const files = Array.from(e.target.files) as File[];
+    
+    try {
+      const uploadedUrls = await uploadImages(files);
+      
+      setTicketPhotos(prev => [...prev, ...uploadedUrls]);
+      setTicketPhotoDescriptions(prev => [...prev, ...files.map(() => '')]);
+    } catch (error) {
+      console.error('Erro ao fazer upload da imagem:', error);
+      alert('Erro ao fazer upload da imagem.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleToggleArchiveTab = (archive: boolean) => {
     setShowArchived(archive);
-    if (!archive && statusFilter === "Concluído") {
+    setVisibleCount(50);
+    if (!archive && statusFilter === "Finalizado") {
       setStatusFilter("Todos");
-    } else if (archive && statusFilter !== "Todos" && statusFilter !== "Concluído") {
+    } else if (archive && statusFilter !== "Todos" && statusFilter !== "Finalizado") {
       setStatusFilter("Todos");
     }
   };
 
   const handleStatusFilterChange = (val: string) => {
     setStatusFilter(val);
-    if (val === "Concluído") {
+    if (val === "Finalizado") {
       setShowArchived(true);
     } else if (val !== "Todos") {
       setShowArchived(false);
@@ -214,7 +166,7 @@ const HomePage: React.FC<HomePageProps> = ({
     "Baixa" | "Média" | "Alta" | "Urgente"
   >("Média");
   const [ticketStatus, setTicketStatus] = useState<
-    "Aberto" | "Em Atendimento" | "Concluído" | "Reagendado"
+    "Aberto" | "Em Atendimento" | "Finalizado" | "Reagendado"
   >("Aberto");
   const [ticketDate, setTicketDate] = useState(
     new Date().toISOString().split("T")[0],
@@ -240,6 +192,7 @@ const HomePage: React.FC<HomePageProps> = ({
   });
 
   const [finishingTicket, setFinishingTicket] = useState<Ticket | null>(null);
+  const [finishStep, setFinishStep] = useState(0);
   const [finishData, setFinishData] = useState<{
     solution: string;
     technicalReport: string;
@@ -265,6 +218,7 @@ const HomePage: React.FC<HomePageProps> = ({
     useState<Ticket | null>(null);
   const [nextMaintenanceDate, setNextMaintenanceDate] = useState("");
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isRemindersModalOpen, setIsRemindersModalOpen] = useState(false);
 
   const [notifiedTickets, setNotifiedTickets] = useState<string[]>(() => {
     const saved = localStorage.getItem("arcontrol_notified_tickets");
@@ -455,7 +409,7 @@ const HomePage: React.FC<HomePageProps> = ({
       }
 
       if (editingTicket) {
-        const isConcluido = ticketStatus === "Concluído";
+        const isConcluido = ticketStatus === "Finalizado";
         onUpdateTicket(editingTicket.id, {
           description: ticketDescription,
           priority: ticketPriority,
@@ -468,6 +422,13 @@ const HomePage: React.FC<HomePageProps> = ({
         });
         setIsTicketModalOpen(false);
       } else {
+        const today = new Date().toISOString().split("T")[0];
+        if (ticketDate < today) {
+          alert("Não é possível abrir chamados com data retroativa.");
+          setIsSubmitting(false);
+          return;
+        }
+
         const newTicket: Ticket = {
           id: `TK-${Math.floor(Math.random() * 9000) + 1000}`,
           unitId: targetUnitId || undefined,
@@ -569,6 +530,7 @@ const HomePage: React.FC<HomePageProps> = ({
     if (transferTicket && selectedTransferTech) {
       onUpdateTicket(transferTicket.id, {
         technicianId: selectedTransferTech,
+        isTransferred: true
       });
       setTransferTicket(null);
       setSelectedTransferTech("");
@@ -577,6 +539,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
   const handleOpenFinishModal = (ticket: Ticket) => {
     setFinishingTicket(ticket);
+    setFinishStep(0);
     setFinishData({
       solution: ticket.solution || "",
       technicalReport: ticket.technicalReport || ticket.solution || "",
@@ -616,18 +579,24 @@ const HomePage: React.FC<HomePageProps> = ({
         return;
       }
 
-      onUpdateTicket(finishingTicket.id, {
-        status: "Concluído",
-        solution: techReport,
-        technicalReport: techReport,
-        photos: finishData.photos,
-        photoDescriptions: finishData.photoDescriptions,
-        finishedAt: new Date().toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        archived: true,
-      });
+      try {
+        onUpdateTicket(finishingTicket.id, {
+          status: "Finalizado",
+          solution: techReport,
+          technicalReport: techReport,
+          photos: finishData.photos,
+          photoDescriptions: finishData.photoDescriptions,
+          finishedAt: new Date().toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          archived: true,
+        });
+      } catch (error) {
+        console.error("Erro ao finalizar chamado:", error);
+        alert("Erro ao encerrar chamado. Tente novamente.");
+        return;
+      }
       setFinishingTicket(null);
       setFinishData({
         solution: "",
@@ -636,41 +605,6 @@ const HomePage: React.FC<HomePageProps> = ({
         photoDescriptions: [],
       });
     }
-  };
-
-  const handleFinishPhotoUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    if (!e.target.files) return;
-    const readers = Array.from(e.target.files).map((file) => {
-      return new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file as Blob);
-      });
-    });
-    const base64s = await Promise.all(readers);
-    setFinishData((prev) => ({
-      ...prev,
-      photos: [...prev.photos, ...base64s],
-      photoDescriptions: [...prev.photoDescriptions, ...base64s.map(() => "")],
-    }));
-  };
-
-  const handleTicketPhotoUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    if (!e.target.files) return;
-    const readers = Array.from(e.target.files).map((file) => {
-      return new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file as Blob);
-      });
-    });
-    const base64s = await Promise.all(readers);
-    setTicketPhotos((prev) => [...prev, ...base64s]);
-    setTicketPhotoDescriptions((prev) => [...prev, ...base64s.map(() => "")]);
   };
 
   const handleDeleteTicketConfirm = () => {
@@ -717,11 +651,11 @@ const HomePage: React.FC<HomePageProps> = ({
     // 0. Archive filtering
     if (showArchived) {
       filtered = filtered.filter(
-        (t) => t.archived === true || t.status === "Concluído",
+        (t) => t.archived === true || t.status === "Finalizado",
       );
     } else {
       filtered = filtered.filter(
-        (t) => t.archived !== true && t.status !== "Concluído",
+        (t) => t.archived !== true && t.status !== "Finalizado",
       );
     }
 
@@ -729,8 +663,9 @@ const HomePage: React.FC<HomePageProps> = ({
     if (user.role === UserRole.CLIENT) {
       filtered = filtered.filter((t) => t.clientName === user.clientName);
     } else if (user.role === UserRole.TECHNICIAN) {
+      const todayDate = new Date().toISOString().split("T")[0];
       filtered = filtered.filter(
-        (t) => t.status === "Aberto" || t.technicianId === user.username,
+        (t) => (t.status === "Aberto" || t.technicianId === user.username) && t.date === todayDate,
       );
     }
 
@@ -752,23 +687,35 @@ const HomePage: React.FC<HomePageProps> = ({
           t.id.toLowerCase().includes(s) ||
           t.clientName.toLowerCase().includes(s) ||
           t.description.toLowerCase().includes(s) ||
+          (t.technicianId && t.technicianId.toLowerCase().includes(s)) ||
+          (t.date && t.date.includes(s)) ||
+          (t.status && t.status.toLowerCase().includes(s)) ||
           (t.unitId && t.unitId.toLowerCase().includes(s)),
       );
     }
 
     return [...filtered].sort((a, b) => {
+      if (showArchived) {
+        // Sort by date DESC for archived
+        const dateA = new Date(a.createdAt || a.date).getTime();
+        const dateB = new Date(b.createdAt || b.date).getTime();
+        return dateB - dateA;
+      }
+
       const order = { Urgente: 0, Alta: 1, Média: 2, Baixa: 3 };
-      if (a.status === "Concluído" && b.status !== "Concluído") return 1;
-      if (b.status === "Concluído" && a.status !== "Concluído") return -1;
+      if (a.status === "Finalizado" && b.status !== "Finalizado") return 1;
+      if (b.status === "Finalizado" && a.status !== "Finalizado") return -1;
 
       const pA = order[a.priority as keyof typeof order] || 4;
       const pB = order[b.priority as keyof typeof order] || 4;
       return pA - pB;
     });
-  }, [tickets, user, statusFilter, priorityFilter, searchTerm]);
+  }, [tickets, user, statusFilter, priorityFilter, searchTerm, showArchived]);
+  
+  const visibleTickets = useMemo(() => sortedTickets.slice(0, visibleCount), [sortedTickets, visibleCount]);
 
   const getPriorityStyles = (priority: string, status: string) => {
-    if (status === "Concluído")
+    if (status === "Finalizado")
       return "border-gray-100 bg-gray-50/50 opacity-60";
     if (status === "Em Atendimento")
       return "border-orange-300 bg-orange-50 shadow-orange-100 ring-1 ring-orange-200";
@@ -815,7 +762,7 @@ const HomePage: React.FC<HomePageProps> = ({
   };
 
   const getPriorityBadgeStyles = (priority: string, status: string) => {
-    if (status === "Concluído")
+    if (status === "Finalizado")
       return "bg-emerald-500 text-white shadow-lg shadow-emerald-100 px-4 py-1.5 rounded-xl";
     if (status === "Em Atendimento")
       return "bg-orange-600 text-white shadow-lg shadow-orange-100 px-4 py-1.5 rounded-xl animate-pulse";
@@ -867,10 +814,19 @@ const HomePage: React.FC<HomePageProps> = ({
     }
   };
 
+  const getTicketOpenedTime = (ticket: Ticket) => {
+    if (ticket.openedAt) return ticket.openedAt;
+    if (ticket.createdAt) {
+      const date = new Date(ticket.createdAt);
+      return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    }
+    return null;
+  };
+
   return (
-    <div className="space-y-8 pb-20 animate-in fade-in duration-500">
+    <div className="space-y-8 pb-10 animate-in fade-in duration-500">
       {/* Welcome Header */}
-      <header className="flex items-center justify-between px-2 pt-2">
+      <header className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-black text-[var(--theme-text)] tracking-tighter">
             Olá,{" "}
@@ -903,6 +859,18 @@ const HomePage: React.FC<HomePageProps> = ({
               </span>
             )}
           </button>
+          {reminders.filter(r => r.status === 'PENDING').length > 0 && (
+            <button
+              onClick={() => setIsRemindersModalOpen(true)}
+              className="relative p-3 bg-white rounded-2xl border border-gray-150 shadow-sm transition-all group flex items-center justify-center animate-pulse"
+              title="Lembretes de Manutenção"
+            >
+              <Calendar className="w-6 h-6 text-blue-500" />
+              <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                {reminders.filter(r => r.status === 'PENDING').length}
+              </span>
+            </button>
+          )}
           <div className="hidden sm:block text-right">
             <p className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em]">
               {new Date().toLocaleDateString("pt-BR", {
@@ -1066,7 +1034,7 @@ const HomePage: React.FC<HomePageProps> = ({
                 <option value="Aberto">Aberto</option>
                 <option value="Em Atendimento">Em Atendimento</option>
                 <option value="Reagendado">Reagendado</option>
-                <option value="Concluído">Concluído</option>
+                <option value="Finalizado">Finalizado</option>
               </select>
             </div>
 
@@ -1307,11 +1275,12 @@ const HomePage: React.FC<HomePageProps> = ({
             ticketViewMode === "grid" ? "grid gap-4" : "flex flex-col gap-3"
           }
         >
-          {sortedTickets.length > 0 ? (
-            sortedTickets.map((ticket) =>
-              ticketViewMode === "grid" ? (
-                <div
-                  key={ticket.id}
+          {visibleTickets.length > 0 ? (
+            <>
+              {visibleTickets.map((ticket) =>
+                ticketViewMode === "grid" ? (
+                  <div
+                    key={ticket.id}
                   className={`p-6 rounded-[2.2rem] border-2 transition-all group ${getPriorityStyles(ticket.priority, ticket.status)}`}
                 >
                   <div className="flex flex-col md:flex-row justify-between items-start gap-4">
@@ -1319,7 +1288,7 @@ const HomePage: React.FC<HomePageProps> = ({
                       <div className="flex flex-wrap items-center gap-3 mb-4">
                         <div
                           className={`p-3 rounded-2xl ${
-                            ticket.status === "Concluído"
+                            ticket.status === "Finalizado"
                               ? "bg-gray-100 text-gray-400"
                               : ticket.status === "Em Atendimento"
                                 ? "bg-orange-100 text-orange-600"
@@ -1338,7 +1307,7 @@ const HomePage: React.FC<HomePageProps> = ({
                         <div className="flex flex-col">
                           <span
                             className={`text-[10px] font-black uppercase tracking-[0.2em] mb-1 ${
-                              ticket.status === "Concluído"
+                              ticket.status === "Finalizado"
                                 ? "text-gray-400"
                                 : ticket.status === "Em Atendimento"
                                   ? "text-orange-600"
@@ -1349,6 +1318,11 @@ const HomePage: React.FC<HomePageProps> = ({
                               ? `Chamado ${ticket.priority}`
                               : ticket.status.toUpperCase()}
                           </span>
+                          {getTicketOpenedTime(ticket) && (
+                            <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-1">
+                              Aberto às {getTicketOpenedTime(ticket)}
+                            </span>
+                          )}
                           <span
                             className={`text-[9px] font-black uppercase tracking-widest ${getPriorityBadgeStyles(ticket.priority, ticket.status)}`}
                           >
@@ -1356,10 +1330,15 @@ const HomePage: React.FC<HomePageProps> = ({
                               ? "EM ATENDIMENTO"
                               : ticket.status === "Reagendado"
                                 ? "REAGENDADO"
-                                : ticket.status === "Concluído"
+                                : ticket.status === "Finalizado"
                                   ? "CONCLUÍDO"
                                   : ticket.priority}
                           </span>
+                          {ticket.isTransferred && (
+                            <span className="ml-2 text-[9px] font-black uppercase tracking-widest bg-blue-600 text-white shadow-lg shadow-blue-200 px-4 py-1.5 rounded-xl">
+                              TRANSFERIDO
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -1374,14 +1353,11 @@ const HomePage: React.FC<HomePageProps> = ({
 
                       {/* Ticket Times: Opening and Closing */}
                       <div className="flex gap-4 mb-3 flex-wrap">
-                        {ticket.openedAt && (
-                          <div className="flex items-center gap-1.5 text-gray-500">
-                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                            <p className="text-[10px] font-black uppercase tracking-widest">
-                              Aberto:{" "}
-                              <span className="text-gray-900">
-                                {ticket.openedAt}
-                              </span>
+                        {getTicketOpenedTime(ticket) && (
+                          <div className="flex items-center gap-2 text-[var(--theme-primary)] bg-[var(--theme-primary-light)] px-3 py-1.5 rounded-full">
+                            <Clock className="w-4 h-4" />
+                            <p className="text-[11px] font-black uppercase tracking-widest">
+                              Aberto às: <span className="font-bold">{getTicketOpenedTime(ticket)}</span>
                             </p>
                           </div>
                         )}
@@ -1424,19 +1400,26 @@ const HomePage: React.FC<HomePageProps> = ({
                           </div>
                         </div>
 
-                        {ticket.technicianId && (
-                          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-orange-100 text-orange-900 rounded-lg border-l-4 border-orange-600 shadow-sm">
-                            <Wrench className="w-4 h-4 text-orange-700" />
-                            <div>
-                              <p className="text-[8px] text-orange-600/70 font-bold uppercase tracking-widest leading-none">
-                                Técnico
-                              </p>
-                              <p className="font-black text-xs uppercase tracking-wide">
-                                {ticket.technicianId}
-                              </p>
+                        {ticket.technicianId && (() => {
+                          const techUser = users.find(u => u.username === ticket.technicianId);
+                          return (
+                            <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-orange-100 text-orange-900 rounded-lg border-l-4 border-orange-600 shadow-sm">
+                              {techUser?.avatarUrl ? (
+                                <img src={techUser.avatarUrl} alt={techUser.username} className="w-6 h-6 rounded-full object-cover" />
+                              ) : (
+                                <Wrench className="w-4 h-4 text-orange-700" />
+                              )}
+                              <div>
+                                <p className="text-[8px] text-orange-600/70 font-bold uppercase tracking-widest leading-none">
+                                  Técnico
+                                </p>
+                                <p className="font-black text-xs uppercase tracking-wide">
+                                  {ticket.technicianId}
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
 
                       {ticket.unitId && (
@@ -1447,7 +1430,7 @@ const HomePage: React.FC<HomePageProps> = ({
                       )}
 
                       {/* Service Report Display (Visible when ticket is Completed or has a technical report) */}
-                      {(ticket.status === "Concluído" ||
+                      {(ticket.status === "Finalizado" ||
                         ticket.technicalReport) && (
                         <div className="mt-4 p-4 bg-white/60 rounded-2xl border border-gray-200">
                           <p className="text-[10px] font-black text-green-600 uppercase tracking-widest mb-2 flex items-center gap-1">
@@ -1461,16 +1444,6 @@ const HomePage: React.FC<HomePageProps> = ({
                               </p>
                               <p className="text-xs font-medium text-gray-800 whitespace-pre-line">
                                 {ticket.technicalReport}
-                              </p>
-                            </div>
-                          )}
-                          {ticket.solution && (
-                            <div>
-                              <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">
-                                Solução
-                              </p>
-                              <p className="text-xs font-medium text-gray-800 whitespace-pre-line">
-                                {ticket.solution}
                               </p>
                             </div>
                           )}
@@ -1504,7 +1477,7 @@ const HomePage: React.FC<HomePageProps> = ({
                         )}
 
                       {/* Rating Display for Completed Tickets */}
-                      {ticket.status === "Concluído" && ticket.rating && (
+                      {ticket.status === "Finalizado" && ticket.rating && (
                         <div className="flex items-center gap-1 mt-2">
                           {[...Array(5)].map((_, i) => (
                             <Star
@@ -1566,7 +1539,7 @@ const HomePage: React.FC<HomePageProps> = ({
                       {(user.role === UserRole.ADMIN ||
                         (user.role === UserRole.TECHNICIAN &&
                           ticket.technicianId === user.username)) &&
-                        ticket.status !== "Concluído" && (
+                        ticket.status !== "Finalizado" && (
                           <button
                             onClick={() => handleOpenTransferModal(ticket)}
                             className="flex-1 md:flex-none flex flex-col items-center justify-center p-2 bg-blue-600 text-white rounded-xl shadow-lg active:scale-95 transition-all min-w-[76px]"
@@ -1597,7 +1570,7 @@ const HomePage: React.FC<HomePageProps> = ({
                         )}
 
                       {/* Photographic Report Action */}
-                      {ticket.status === "Concluído" && (
+                      {ticket.status === "Finalizado" && (
                         <button
                           onClick={() => setReportTicket(ticket)}
                           className="flex-1 md:flex-none p-3 bg-indigo-100 text-indigo-600 rounded-xl shadow-sm hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-2"
@@ -1612,7 +1585,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
                       {/* Archive/Restore Action (Admin Only) */}
                       {user.role === UserRole.ADMIN &&
-                        (ticket.status === "Concluído" && !ticket.archived ? (
+                        (ticket.status === "Finalizado" && !ticket.archived ? (
                           <button
                             onClick={() =>
                               onUpdateTicket(ticket.id, { archived: true })
@@ -1624,19 +1597,23 @@ const HomePage: React.FC<HomePageProps> = ({
                           </button>
                         ) : ticket.archived ? (
                           <button
-                            onClick={() =>
-                              onUpdateTicket(ticket.id, { archived: false })
-                            }
-                            className="flex-1 md:flex-none p-3 bg-emerald-100 text-emerald-600 rounded-xl shadow-sm hover:bg-emerald-200 transition-all"
+                            onClick={() => {
+                              const confirmRestore = window.confirm("Restaurar este chamado arquivado reabrirá o mesmo para 'Em Atendimento'. Deseja continuar?");
+                              if (confirmRestore) {
+                                onUpdateTicket(ticket.id, { archived: false, status: 'Em Atendimento' })
+                              }
+                            }}
+                            className="flex-1 md:flex-none p-3 bg-emerald-100 text-emerald-600 rounded-xl shadow-sm hover:bg-emerald-200 transition-all flex items-center justify-center gap-2"
                             title="Desarquivar / Reabrir"
                           >
-                            <ArchiveRestore className="w-5 h-5 mx-auto" />
+                            <ArchiveRestore className="w-5 h-5" />
+                            <span className="text-[10px] font-black uppercase tracking-tighter">Restaurar</span>
                           </button>
                         ) : null)}
 
                       {/* Client Rating Action */}
                       {user.role === UserRole.CLIENT &&
-                        ticket.status === "Concluído" &&
+                        ticket.status === "Finalizado" &&
                         !ticket.rating && (
                           <button
                             onClick={() => {
@@ -1653,7 +1630,7 @@ const HomePage: React.FC<HomePageProps> = ({
                         )}
 
                       {/* General Actions */}
-                      {ticket.status === "Concluído" &&
+                      {ticket.status === "Finalizado" &&
                         user.role === UserRole.ADMIN && (
                           <button
                             onClick={() => handleRemindUser(ticket)}
@@ -1667,7 +1644,7 @@ const HomePage: React.FC<HomePageProps> = ({
                           </button>
                         )}
 
-                      {ticket.status !== "Concluído" &&
+                      {ticket.status !== "Finalizado" &&
                         (user.role === UserRole.ADMIN ||
                           user.role === UserRole.CLIENT) && (
                           <button
@@ -1721,7 +1698,7 @@ const HomePage: React.FC<HomePageProps> = ({
                 >
                   <div
                     className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                      ticket.status === "Concluído"
+                      ticket.status === "Finalizado"
                         ? "bg-gray-100 text-gray-400"
                         : ticket.status === "Em Atendimento"
                           ? "bg-orange-100 text-orange-600"
@@ -1734,7 +1711,7 @@ const HomePage: React.FC<HomePageProps> = ({
                               : "bg-blue-100 text-blue-600"
                     }`}
                   >
-                    {ticket.status === "Concluído" ? (
+                    {ticket.status === "Finalizado" ? (
                       <CheckCircle2 className="w-6 h-6" />
                     ) : ticket.status === "Em Atendimento" ? (
                       <AirVent className="w-6 h-6 animate-spin-slow" />
@@ -1750,11 +1727,22 @@ const HomePage: React.FC<HomePageProps> = ({
                       <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">
                         {ticket.id}
                       </span>
+                      {ticket.technicianId && (() => {
+                        const techUser = users.find(u => u.username === ticket.technicianId);
+                        return techUser?.avatarUrl ? (
+                          <img src={techUser.avatarUrl} alt={techUser.username} className="w-5 h-5 rounded-full object-cover ml-1" title={ticket.technicianId} />
+                         ) : null;
+                      })()}
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest ${getPriorityBadgeStyles(ticket.priority, ticket.status)}`}
+                        className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest ml-auto ${getPriorityBadgeStyles(ticket.priority, ticket.status)}`}
                       >
                         {ticket.status}
                       </span>
+                      {ticket.isTransferred && (
+                        <span className="px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest bg-blue-600 text-white shadow-sm ml-1">
+                          TRANSFERIDO
+                        </span>
+                      )}
                       <span className="text-[9px] font-black text-gray-900 ml-auto">
                         {ticket.date.split("-").reverse().join("/")}
                       </span>
@@ -1805,7 +1793,8 @@ const HomePage: React.FC<HomePageProps> = ({
                   </div>
                 </div>
               ),
-            )
+              )}
+            </>
           ) : (
             <div className="text-center py-10 bg-white rounded-[2.5rem] border border-dashed border-gray-200">
               <p className="text-gray-300 font-black uppercase text-xs tracking-widest">
@@ -1814,6 +1803,16 @@ const HomePage: React.FC<HomePageProps> = ({
             </div>
           )}
         </div>
+        {sortedTickets.length > visibleCount && (
+          <div className="flex justify-center mt-6">
+            <button
+              onClick={() => setVisibleCount((prev) => prev + 50)}
+              className="px-6 py-3 bg-[var(--theme-primary-light)] text-[var(--theme-primary)] rounded-full font-black text-xs uppercase tracking-widest hover:bg-[var(--theme-primary)] hover:text-white transition-all shadow-sm"
+            >
+              Exibir mais resultados ({sortedTickets.length - visibleCount} restantes)
+            </button>
+          </div>
+        )}
       </section>
       )}
 
@@ -1821,7 +1820,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
       {/* Ticket Wizard Modal */}
       {isTicketModalOpen && (
-        <div className="fixed inset-0 z-[3000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-[3000] bg-black/80 backdrop-blur-sm flex flex-col items-center pt-10 sm:pt-20 pb-10 p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-lg rounded-[3rem] p-10 shadow-2xl relative">
             <button
               onClick={() => setIsTicketModalOpen(false)}
@@ -1831,7 +1830,7 @@ const HomePage: React.FC<HomePageProps> = ({
             </button>
 
             {ticketFlowStep === "selection" && (
-              <div className="space-y-8 animate-in slide-in-from-bottom-4">
+              <div key="selection" className="space-y-8 animate-in slide-in-from-bottom-4">
                 <div className="text-center space-y-2">
                   <h3 className="text-3xl font-black tracking-tighter italic text-[var(--theme-text)]">
                     Como podemos ajudar?
@@ -1872,7 +1871,7 @@ const HomePage: React.FC<HomePageProps> = ({
             )}
 
             {ticketFlowStep === "new-unit" && (
-              <div className="space-y-6 animate-in slide-in-from-right-4">
+              <div key="new-unit" className="space-y-6 animate-in slide-in-from-right-4">
                 <button
                   onClick={() => setTicketFlowStep("selection")}
                   className="flex items-center gap-2 text-[var(--theme-primary)] font-black text-[10px] uppercase tracking-widest mb-4"
@@ -1943,6 +1942,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
             {ticketFlowStep === "problem" && (
               <form
+                key="problem"
                 onSubmit={handleSaveTicket}
                 className="space-y-6 animate-in slide-in-from-right-4"
               >
@@ -1978,6 +1978,16 @@ const HomePage: React.FC<HomePageProps> = ({
                 <h3 className="text-2xl font-black tracking-tighter italic text-[var(--theme-text)]">
                   {editingTicket ? "Editar Chamado" : "Relate o Problema"}
                 </h3>
+                
+                {editingTicket && getTicketOpenedTime(editingTicket) && (
+                    <div className="flex items-center gap-2 text-[var(--theme-primary)] bg-[var(--theme-primary-light)] px-4 py-2 rounded-full w-fit">
+                        <Clock className="w-4 h-4" />
+                        <p className="text-[11px] font-black uppercase tracking-widest">
+                            Aberto às: <span className="font-bold">{getTicketOpenedTime(editingTicket)}</span>
+                        </p>
+                    </div>
+                )}
+
 
                 {!editingTicket && !newUnitData.brand && (
                   <div className="space-y-1">
@@ -2014,43 +2024,32 @@ const HomePage: React.FC<HomePageProps> = ({
 
                 <div className="space-y-3">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
-                    Fotos (Opcional)
+                    Fotos do Serviço
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {ticketPhotos.map((p, i) => (
-                      <div key={i} className="space-y-2">
-                        <img
-                          src={p}
-                          className="w-full aspect-video rounded-xl object-cover border border-gray-200"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Descrição da foto..."
-                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[10px] font-medium outline-none focus:border-[var(--theme-primary)]"
-                          value={ticketPhotoDescriptions[i] || ""}
-                          onChange={(e) => {
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    {ticketPhotos.map((url, idx) => (
+                      <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100">
+                        <img src={url} className="w-full h-full object-cover" />
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            const newPhotos = [...ticketPhotos];
                             const newDescs = [...ticketPhotoDescriptions];
-                            newDescs[i] = e.target.value;
+                            newPhotos.splice(idx, 1);
+                            newDescs.splice(idx, 1);
+                            setTicketPhotos(newPhotos);
                             setTicketPhotoDescriptions(newDescs);
                           }}
-                        />
+                          className="absolute top-1 right-1 p-1 bg-black/50 text-white rounded-full hover:bg-red-500"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
                     ))}
-                    {ticketPhotos.length < 4 && (
-                      <label className="aspect-video rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-[var(--theme-primary-light)] hover:border-[var(--theme-primary)] transition-all text-gray-400 hover:text-[var(--theme-primary)]">
-                        <Camera className="w-6 h-6 mb-1" />
-                        <span className="text-[8px] font-black uppercase">
-                          Add Foto
-                        </span>
-                        <input
-                          type="file"
-                          multiple
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleTicketPhotoUpload}
-                        />
-                      </label>
-                    )}
+                    <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-[var(--theme-primary)] hover:bg-blue-50 transition-all">
+                      {isImageUploading ? <p className="text-[10px] font-bold">Carregando...</p> : <Plus className="w-6 h-6 text-gray-400" />}
+                      <input type="file" className="hidden" multiple accept="image/*" onChange={handleFileUpload} />
+                    </label>
                   </div>
                 </div>
 
@@ -2076,6 +2075,7 @@ const HomePage: React.FC<HomePageProps> = ({
                     </label>
                     <input
                       type="date"
+                      min={new Date().toISOString().split("T")[0]}
                       className="w-full px-5 py-3.5 bg-gray-50 rounded-xl font-bold"
                       value={ticketDate}
                       onChange={(e) => setTicketDate(e.target.value)}
@@ -2097,7 +2097,7 @@ const HomePage: React.FC<HomePageProps> = ({
                       <option value="Aberto">Aberto</option>
                       <option value="Em Atendimento">Em Atendimento</option>
                       <option value="Reagendado">Reagendado</option>
-                      <option value="Concluído">Concluído</option>
+                      <option value="Finalizado">Finalizado</option>
                     </select>
                   </div>
                 )}
@@ -2117,7 +2117,7 @@ const HomePage: React.FC<HomePageProps> = ({
             )}
 
             {ticketFlowStep === "success" && lastCreatedTicket && (
-              <div className="text-center space-y-8 animate-in zoom-in-95">
+              <div key="success" className="text-center space-y-8 animate-in zoom-in-95">
                 <div className="bg-emerald-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto text-emerald-600">
                   <CheckCircle2 className="w-12 h-12" />
                 </div>
@@ -2131,14 +2131,11 @@ const HomePage: React.FC<HomePageProps> = ({
                 </div>
                 <div className="p-6 bg-gray-50 rounded-3xl text-left border border-gray-100">
                   <div className="text-sm font-bold text-gray-800 leading-relaxed">
-                    ✅ O técnico responsável já foi notificado sobre o seu
-                    chamado.
+                    ✅ O técnico responsável será notificado sobre o seu chamado.
                     <br />
-                    ⏳ O prazo de atendimento foi iniciado, com tempo estimado
-                    de até 8 horas para execução do serviço.
+                    ⏳ O prazo de um retorno Técnico de 30 minutos.
                     <br />
-                    Você poderá acompanhar o andamento em tempo real pelo
-                    sistema.
+                    Você poderá acompanhar o andamento em tempo real pelo sistema.
                   </div>
                 </div>
                 <div className="flex flex-col gap-3">
@@ -2163,7 +2160,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
       {/* Transfer Ticket Modal */}
       {transferTicket && (
-        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex flex-col items-center pt-10 sm:pt-20 pb-10 p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 my-8">
             <div className="flex justify-between items-center mb-6">
               <div>
@@ -2231,7 +2228,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
       {/* Maintenance Reminder Modal */}
       {remindMaintenanceTicket && (
-        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex flex-col items-center pt-10 sm:pt-20 pb-10 p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95">
             <div className="flex justify-between items-center mb-6">
               <div>
@@ -2298,7 +2295,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
       {/* Notifications Modal */}
       {isNotificationsOpen && (
-        <div className="fixed inset-0 z-[4000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[4000] bg-black/80 backdrop-blur-sm flex flex-col items-center pt-10 sm:pt-20 pb-10 p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl animate-in slide-in-from-bottom-10 duration-500">
             <div className="flex justify-between items-center mb-8">
               <div className="flex items-center gap-3">
@@ -2429,155 +2426,149 @@ const HomePage: React.FC<HomePageProps> = ({
 
       {/* Finish Ticket Modal (Report) */}
       {finishingTicket && (
-        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 my-8">
+        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex p-4 justify-center items-center overflow-y-auto">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95">
             <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-2xl font-black italic tracking-tighter text-[var(--theme-text)]">
-                  Registrar Relatório Técnico Fotográfico
-                </h2>
-                <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">
-                  Relatório Técnico
-                </p>
-              </div>
+              <h2 className="text-2xl font-black italic tracking-tighter text-[var(--theme-text)]">
+                {finishStep === 0
+                  ? "Registrar Relatório Técnico Fotográfico"
+                  : "Confirmar Encerramento"}
+              </h2>
               <button
-                onClick={() => setFinishingTicket(null)}
-                className="p-2 bg-gray-50 rounded-full"
+                onClick={() => { setFinishingTicket(null); setFinishStep(0); }}
+                className="p-2 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleConfirmFinish} className="space-y-6">
-              {/* Relatório Técnico Section (Always editable so technician can save and update) */}
-              <div className="p-5 bg-purple-50/75 border border-purple-100 rounded-[1.8rem] space-y-3 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-24 h-24 bg-purple-200/5 rounded-full blur-2xl -mr-8 -mt-8"></div>
-                <div className="flex justify-between items-center relative z-10">
-                  <p className="text-xs text-purple-800 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
-                    Relatório Técnico (Editável)
+            {finishStep === 0 && (
+              <form onSubmit={(e) => { e.preventDefault(); setFinishStep(1); }} className="space-y-6">
+                {/* Relatório Técnico Section (Always editable so technician can save and update) */}
+                <div className="p-5 bg-purple-50/75 border border-purple-100 rounded-[1.8rem] space-y-3 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-purple-200/5 rounded-full blur-2xl -mr-8 -mt-8"></div>
+                  <div className="flex justify-between items-center relative z-10">
+                    <p className="text-xs text-purple-800 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                      Relatório Técnico (Editável)
+                    </p>
+                    {finishingTicket?.technicalReport && (
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-[8px] font-black uppercase rounded-full">
+                        Salvo
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-500 font-semibold leading-normal relative z-10">
+                    Insira ou faça alterações no seu parecer técnico de
+                    diagnóstico e condições do equipamento.
                   </p>
-                  {finishingTicket.technicalReport && (
-                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-[8px] font-black uppercase rounded-full">
-                      Salvo
-                    </span>
-                  )}
+                  <div className="space-y-1 relative z-10">
+                    <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest ml-1">
+                      Conteúdo do Relatório{" "}
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      className="w-full px-4 py-3 bg-white border border-purple-100 focus:border-purple-500 rounded-xl font-medium outline-none text-xs h-28 resize-none transition-all shadow-sm"
+                      placeholder="Insira o seu parecer técnico, o que foi diagnosticado, estado do equipamento, etc..."
+                      value={finishData.technicalReport}
+                      onChange={(e) =>
+                        setFinishData({
+                          ...finishData,
+                          technicalReport: e.target.value,
+                        })
+                      }
+                      required
+                    />
+                  </div>
                 </div>
-                <p className="text-[11px] text-gray-500 font-semibold leading-normal relative z-10">
-                  Insira ou faça alterações no seu parecer técnico de
-                  diagnóstico e condições do equipamento.
-                </p>
-                <div className="space-y-1 relative z-10">
-                  <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest ml-1">
-                    Conteúdo do Relatório{" "}
-                    <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 bg-white border border-purple-100 focus:border-purple-500 rounded-xl font-medium outline-none text-xs h-28 resize-none transition-all shadow-sm"
-                    placeholder="Insira o seu parecer técnico, o que foi diagnosticado, estado do equipamento, etc..."
-                    value={finishData.technicalReport}
-                    onChange={(e) =>
-                      setFinishData({
-                        ...finishData,
-                        technicalReport: e.target.value,
-                      })
-                    }
-                    required
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-3">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
-                  Fotos do Serviço
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {finishData.photos.map((p, i) => (
-                    <div key={i} className="space-y-2 relative">
-                      <div className="relative">
-                        <img
-                          src={p}
-                          className="w-full aspect-video rounded-xl object-cover border border-gray-200"
-                        />
-                        <button
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
+                    Fotos do Serviço
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    {finishData.photos.map((url, idx) => (
+                      <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100">
+                        <img src={url} className="w-full h-full object-cover" />
+                        <button 
                           type="button"
                           onClick={() => {
-                            const newPhotos = finishData.photos.filter(
-                              (_, idx) => idx !== i,
-                            );
-                            const newDescs =
-                              finishData.photoDescriptions.filter(
-                                (_, idx) => idx !== i,
-                              );
-                            setFinishData({
-                              ...finishData,
-                              photos: newPhotos,
-                              photoDescriptions: newDescs,
-                            });
+                            const newPhotos = [...finishData.photos];
+                            const newDescs = [...finishData.photoDescriptions];
+                            newPhotos.splice(idx, 1);
+                            newDescs.splice(idx, 1);
+                            setFinishData({...finishData, photos: newPhotos, photoDescriptions: newDescs});
                           }}
-                          className="absolute top-2 right-2 p-1.5 bg-red-600 text-white hover:bg-red-700 rounded-lg shadow-md transition-all flex items-center justify-center"
-                          title="Remover Foto"
+                          className="absolute top-1 right-1 p-1 bg-black/50 text-white rounded-full hover:bg-red-500"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <X className="w-3 h-3" />
                         </button>
                       </div>
-                      <input
-                        type="text"
-                        placeholder="Descrição da foto..."
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[10px] font-medium outline-none focus:border-green-500"
-                        value={finishData.photoDescriptions[i] || ""}
-                        onChange={(e) => {
-                          const newDescs = [...finishData.photoDescriptions];
-                          newDescs[i] = e.target.value;
-                          setFinishData({
-                            ...finishData,
-                            photoDescriptions: newDescs,
-                          });
-                        }}
-                      />
-                    </div>
-                  ))}
-                  {finishData.photos.length < 8 && (
-                    <label className="aspect-video rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-green-50 hover:border-green-300 transition-all text-gray-400 hover:text-green-600">
-                      <Camera className="w-6 h-6 mb-1" />
-                      <span className="text-[8px] font-black uppercase">
-                        Add Foto
-                      </span>
-                      <input
-                        type="file"
-                        multiple
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleFinishPhotoUpload}
-                      />
+                    ))}
+                    <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-[var(--theme-primary)] hover:bg-purple-50 transition-all">
+                      {isImageUploading ? <p className="text-[10px] font-bold">Carregando...</p> : <Plus className="w-6 h-6 text-gray-400" />}
+                      <input type="file" className="hidden" multiple accept="image/*" onChange={async (e) => {
+                          if (!e.target.files || e.target.files.length === 0) return;
+                          
+                          const files = Array.from(e.target.files) as File[];
+                          const uploadedUrls = await uploadImages(files);
+                          setFinishData(prev => ({
+                              ...prev,
+                              photos: [...prev.photos, ...uploadedUrls],
+                              photoDescriptions: [...prev.photoDescriptions, ...files.map(() => '')]
+                          }));
+                      }} />
                     </label>
-                  )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    className="w-full bg-purple-50 hover:bg-purple-100 text-purple-700 border-2 border-purple-200 py-4 rounded-[1.5rem] font-black transition-all flex items-center justify-center gap-2 text-sm shadow-sm"
+                  >
+                    <Save className="w-4 h-4" /> Salvar Rascunho
+                  </button>
+                  <button
+                    type="submit"
+                    className="w-full bg-green-600 text-white hover:bg-green-700 py-4 rounded-[1.5rem] font-black shadow-lg shadow-green-100 transition-all flex items-center justify-center gap-2 text-sm"
+                  >
+                    <CheckSquare className="w-4 h-4" /> Concluir e Fechar
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {finishStep === 1 && (
+              <div className="text-center py-6 space-y-6">
+                <p className="text-lg font-bold text-gray-800">Deseja finalizar o atendimento?</p>
+                <div className="grid grid-cols-2 gap-4">
+                    <button onClick={() => setFinishStep(0)} className="py-3 bg-gray-200 rounded-full font-bold">Voltar</button>
+                    <button onClick={() => setFinishStep(2)} className="py-3 bg-green-600 text-white rounded-full font-bold">Sim</button>
                 </div>
               </div>
+            )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                <button
-                  type="button"
-                  onClick={handleSaveDraft}
-                  className="w-full bg-purple-50 hover:bg-purple-100 text-purple-700 border-2 border-purple-200 py-4 rounded-[1.5rem] font-black transition-all flex items-center justify-center gap-2 text-sm shadow-sm"
-                >
-                  <Save className="w-4 h-4" /> Salvar Rascunho
-                </button>
-                <button
-                  type="submit"
-                  className="w-full bg-green-600 text-white hover:bg-green-700 py-4 rounded-[1.5rem] font-black shadow-lg shadow-green-100 transition-all flex items-center justify-center gap-2 text-sm"
-                >
-                  <CheckSquare className="w-4 h-4" /> Concluir e Fechar
-                </button>
+            {finishStep === 2 && (
+              <div className="text-center py-6 space-y-6">
+                <p className="text-lg font-bold text-red-600">Tem certeza? O chamado será encerrado definitivamente e não poderá mais ser editado.</p>
+                <div className="grid grid-cols-2 gap-4">
+                    <button onClick={() => setFinishStep(1)} className="py-3 bg-gray-200 rounded-full font-bold">Voltar</button>
+                    <button onClick={() => {
+                        const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+                        handleConfirmFinish(fakeEvent);
+                    }} className="py-3 bg-red-600 text-white rounded-full font-bold">Encerrar Chamado</button>
+                </div>
               </div>
-            </form>
+            )}
           </div>
         </div>
       )}
 
       {/* Reschedule Modal */}
       {rescheduleTicket && (
-        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex flex-col items-center pt-10 sm:pt-20 pb-10 p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 my-8">
             <div className="flex justify-between items-center mb-8">
               <div>
@@ -2646,7 +2637,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
       {/* Rating Modal */}
       {ratingTicket && (
-        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[3100] bg-black/80 backdrop-blur-sm flex flex-col items-center pt-10 sm:pt-20 pb-10 p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 text-center shadow-2xl animate-in zoom-in-95">
             <h3 className="text-2xl font-black text-[var(--theme-text)] mb-2">
               Avaliar Atendimento
@@ -2691,7 +2682,7 @@ const HomePage: React.FC<HomePageProps> = ({
 
       {/* Delete Confirmation Modal */}
       {deleteTicketConfirmation && (
-        <div className="fixed inset-0 z-[3200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[3200] bg-black/80 backdrop-blur-sm flex flex-col items-center pt-10 sm:pt-20 pb-10 p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 text-center shadow-2xl animate-in zoom-in-95">
             <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
               <Trash2 className="w-10 h-10 text-red-600" />
@@ -2724,18 +2715,23 @@ const HomePage: React.FC<HomePageProps> = ({
         </div>
       )}
 
-      {reportTicket && (
-        <PhotoReportModal
-          data={reportTicket}
-          unit={units.find((u) => u.id === reportTicket.unitId)}
-          onClose={() => setReportTicket(null)}
-        />
-      )}
+      {/* Report ticket removed */}
+
 
       {isScannerOpen && (
         <QRScannerModal
           isOpen={isScannerOpen}
           onClose={() => setIsScannerOpen(false)}
+        />
+      )}
+
+      {isRemindersModalOpen && (
+        <RemindersModal
+          isOpen={isRemindersModalOpen}
+          onClose={() => setIsRemindersModalOpen(false)}
+          reminders={reminders}
+          onAccept={onAcceptReminder}
+          onRemove={onRemoveReminder}
         />
       )}
     </div>

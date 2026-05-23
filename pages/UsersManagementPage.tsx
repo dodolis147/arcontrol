@@ -106,8 +106,12 @@ const UsersManagementPage: React.FC<UsersManagementPageProps> = ({ users, curren
             // Alterado hover:border-blue-400 para hover:border-purple-400
             <div key={u.id} className={`bg-white p-6 rounded-[2.2rem] border-2 shadow-sm flex items-center justify-between group transition-all ${u.status === UserStatus.BLOCKED ? 'border-red-50 bg-gray-50/50' : 'border-gray-100 hover:border-purple-400'}`}>
               <div className="flex items-center gap-4 min-w-0">
-                <div className={`p-3 rounded-2xl flex-shrink-0 ${getRoleColor(u.role, u.status === UserStatus.BLOCKED)}`}>
-                  {getRoleIcon(u.role)}
+                <div className={`w-12 h-12 flex items-center justify-center rounded-2xl flex-shrink-0 overflow-hidden ${u.avatarUrl ? '' : getRoleColor(u.role, u.status === UserStatus.BLOCKED)}`}>
+                  {u.avatarUrl ? (
+                    <img src={u.avatarUrl} alt={u.username} className="w-full h-full object-cover" />
+                  ) : (
+                    getRoleIcon(u.role)
+                  )}
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">

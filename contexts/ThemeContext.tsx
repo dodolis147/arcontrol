@@ -15,6 +15,8 @@ interface ThemeContextType {
   resetTheme: () => void;
   appName: string;
   updateAppName: (name: string) => void;
+  logoUrl: string | null;
+  updateLogoUrl: (url: string | null) => void;
 }
 
 const defaultTheme: Theme = {
@@ -37,6 +39,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const [appName, setAppName] = useState<string>(() => {
     return localStorage.getItem('arcontrol_app_name') || 'ArControl';
+  });
+
+  const [logoUrl, setLogoUrl] = useState<string | null>(() => {
+    return localStorage.getItem('arcontrol_logo_url');
   });
 
   useEffect(() => {
@@ -63,6 +69,15 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem('arcontrol_app_name', name);
   };
 
+  const updateLogoUrl = (url: string | null) => {
+    setLogoUrl(url);
+    if (url) {
+      localStorage.setItem('arcontrol_logo_url', url);
+    } else {
+      localStorage.removeItem('arcontrol_logo_url');
+    }
+  };
+
   const updateTheme = (newTheme: Partial<Theme>) => {
     setTheme(prev => ({ ...prev, ...newTheme }));
   };
@@ -70,10 +85,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const resetTheme = () => {
     setTheme(defaultTheme);
     updateAppName('ArControl');
+    updateLogoUrl(null);
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, updateTheme, resetTheme, appName, updateAppName }}>
+    <ThemeContext.Provider value={{ theme, updateTheme, resetTheme, appName, updateAppName, logoUrl, updateLogoUrl }}>
       {children}
     </ThemeContext.Provider>
   );
